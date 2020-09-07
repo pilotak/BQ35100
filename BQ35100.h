@@ -25,10 +25,10 @@ using namespace std::chrono;
     #define TRACE_GROUP  "BATT"
 #endif
 
-#define BATTERY_GAUGE_BQ35100_ADDRESS 0x55 << 1
+#define BATTERY_GAUGE_BQ35100_ADDRESS (0x55 << 1)
 
 /** Settling time after gaugeEnable is set high */
-#define GAUGE_ENABLE_SETTLING_TIME_MS 10ms
+#define GAUGE_ENABLE_SETTLING_TIME_MS 50ms
 
 /** The default seal codes (step 1 in the higher word, step 2 the lower word), NOT byte reversed. */
 #define SEAL_CODES_DEFAULT 0x04143672
@@ -39,6 +39,8 @@ using namespace std::chrono;
 /** How long to wait for accumulated capacity data to be written
  * to data flash when gauging is disabled */
 #define GAUGE_COMPLETE_WAIT 10000 // ms
+
+#define BQ35100_STATUS_SS           (1<<13)
 
 class BQ35100 {
   public:
@@ -54,7 +56,7 @@ class BQ35100 {
      *
      * @param address I2C address of the battery gauge chip.
      */
-    BQ35100(int8_t address = BATTERY_GAUGE_BQ35100_ADDRESS);
+    BQ35100(uint8_t address = BATTERY_GAUGE_BQ35100_ADDRESS);
 
     /**
      * @brief Construct
@@ -64,7 +66,7 @@ class BQ35100 {
      * @param frequency frequency of I2C bus
      * @param address I2C address of the battery gauge chip
      */
-    BQ35100(PinName sda, PinName scl, int8_t address = BATTERY_GAUGE_BQ35100_ADDRESS, uint32_t frequency = 400000);
+    BQ35100(PinName sda, PinName scl, uint8_t address = BATTERY_GAUGE_BQ35100_ADDRESS, uint32_t frequency = 400000);
 
     /**
      * @brief Destructor
@@ -97,7 +99,7 @@ class BQ35100 {
      *                    disableGauge() is called.
      * @return true if successful, otherwise false.
      */
-    bool enableGauge(bool nonVolatile = false);
+    bool enableGauge();
 
     /**
      * @brief Switch off the battery gauge.  If gauging to non-volatile
@@ -128,34 +130,34 @@ class BQ35100 {
     /**
      * @brief Get the designed capacity of the cell.
      *
-     * @param pCapacityMAh a place to put the capacity.
+     * @param capacity a place to put the capacity.
      * @return true if successful, otherwise false.
      */
-    bool getDesignCapacity(uint32_t *pCapacityMAh);
+    bool getDesignCapacity(uint16_t *capacity);
 
     /**
      * @brief Read the temperature of the BQ35100 chip.
      *
-     * @param pTemperatureC place to put the temperature reading.
+     * @param temp place to put the temperature reading.
      * @return true if successful, otherwise false.
      */
-    bool getTemperature(int32_t *pTemperatureC);
+    bool getTemperature(int16_t *temp);
 
     /**
      * @brief Read the voltage of the battery.
      *
-     * @param pVoltageMV place to put the voltage reading.
+     * @param voltage place to put the voltage reading.
      * @return true if successful, otherwise false.
      */
-    bool getVoltage(int32_t *pVoltageMV);
+    bool getVoltage(uint16_t *voltage);
 
     /**
      * @brief Read the current flowing from the battery.
      *
-     * @param pCurrentMA place to put the current reading.
+     * @param current place to put the current reading.
      * @return true if successful, otherwise false.
      */
-    bool getCurrent(int32_t *pCurrentMA);
+    bool getCurrent(uint16_t *current);
 
     /**
      * @brief Read the battery capacity used in uAh (NOT mAh).
@@ -272,27 +274,69 @@ class BQ35100 {
      * @brief Advanced function to perform a hard reset of the chip, reinitialising RAM
      *
      * data to defaults from ROM.
-     * Note: the security mode of the chip is unaffected.
+     * @note the security mode of the chip is unaffected.
      * @return true if successful, otherwise false.
      */
     bool advancedReset(void);
 
   protected:
+    typedef enum {
+        CMD_CONTROL = 0x00,
+        CMD_ACCUMULATED_CAPACITY = 0x02,
+        CMD_TEMPERATURE = 0x06,
+        CMD_VOLTAGE = 0x08,
+        CMD_BATTERY_STATUS = 0x0A,
+        CMD_BATTERY_ALERT = 0x0B,
+        CMD_CURRENT = 0x0C,
+        CMD_SCALED_R = 0x16,
+        CMD_MEASURED_Z = 0x22,
+        CMD_INTERNAL_TEMPERATURE = 0x28,
+        CMD_STATE_OF_HEALTH = 0x2E,
+        // extended
+        CMD_OP_CONFIG = 0x3A,
+        CMD_DESIGN_CAPACITY = 0x3C,
+        CMD_MAC = 0x3E,
+        CMD_MAC_DATA = 0x40,
+        CMD_MAC_DATA_SUM = 0x60,
+        CMD_MAC_DATA_LEN = 0x61
+    } bq35100_cmd_t;
+
+    typedef enum {
+        CNTL_CONTROL_STATUS = 0x0000,
+        CNTL_DEVICE_TYPE    = 0x0001,
+        CNTL_FW_VERSION     = 0x0002,
+        CNTL_HW_VERSION     = 0x0003,
+        CNTL_CHEM_DF_CHKSUM = 0x0005,
+        CNTL_CHEM_ID        = 0x0006,
+        CNTL_PREV_MACWRITE  = 0x0007,
+        CNTL_BOARD_OFFSET   = 0x0009,
+        CNTL_CC_OFFSET      = 0x000A,
+        CNTL_CC_OFFSET_SAVE = 0x000B,
+        CNTL_GAUGE_START    = 0x0011,
+        CNTL_GAUGE_STOP     = 0x0012,
+        CNTL_CAL_ENABLE     = 0x002D,
+        CNTL_LT_ENABLE      = 0x002E,
+        CNTL_SEAL           = 0x0020,
+        CNTL_RESET          = 0x0041,
+        CNTL_NEW_BATTERY    = 0xA613
+    } bq35100_cntl_t;
+
     I2C *_i2c;
     DigitalOut *_gaugeEnable;
     uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
-    const int8_t _address = BATTERY_GAUGE_BQ35100_ADDRESS;
+    const uint8_t _address = BATTERY_GAUGE_BQ35100_ADDRESS;
     bool _ready = false;
 
     /** The seal codes for the device (step 1 in the higher word, step 2 the lower word), NOT byte reversed. . */
     uint32_t _sealCodes = SEAL_CODES_DEFAULT;
     /** The full access codes for the device (step 1 in the higher word, step 2 the lower word), NOT byte reversed. . */
     uint32_t _fullAccessCodes = 0;
+    bool _enabled = false;
 
     /**
      * @brief Read two bytes starting at a given address.
      *
-     * Note: _i2c should be locked before this is called.
+     * @note _i2c should be locked before this is called.
      * @param registerAddress the register address to start reading from.
      * @param pBytes place to put the two bytes.
      * @return true if successful, otherwise false.
@@ -312,7 +356,7 @@ class BQ35100 {
     /**
      * @brief Read data of a given length and class ID.
      *
-     * Note: _i2c should be locked before this is called.
+     * @note _i2c should be locked before this is called.
      * @param address the address of the data within the class.
      * @param pData a place to put the read data.
      * @param length the size of the place to put the data block.
@@ -323,7 +367,7 @@ class BQ35100 {
     /**
      * @brief Write an extended data block.
      *
-     * Note: _i2c should be locked before this is called.
+     * @note _i2c should be locked before this is called.
      * @param address the address to write to.
      * @param pData a pointer to the data to be written.
      * @param length the size of the data to be written.
@@ -334,7 +378,7 @@ class BQ35100 {
     /**
      * @brief Get the security mode of the chip.
      *
-     * Note: _i2c should be locked before this is called.
+     * @note _i2c should be locked before this is called.
      * @return the security mode.
      */
     security_mode_t getSecurityMode(void);
@@ -342,7 +386,7 @@ class BQ35100 {
     /**
      * @brief Set the security mode of the chip.
      *
-     * Note: _i2c should be locked before this is called.
+     * @note _i2c should be locked before this is called.
      * @param securityMode the security mode to set.
      * @return true if successful, otherwise false.
      */
@@ -351,11 +395,27 @@ class BQ35100 {
     /**
      * @brief Make sure that the chip is awake and has taken a reading.
      *
-    * Note: the function does its own locking of gpI2C so that it isn't
+    * @note the function does its own locking of gpI2C so that it isn't
     * held for the entire time we wait for ADC readings to complete.
     * @return true if successful, otherwise false.
     */
     bool makeAdcReading(void);
+
+    bool write(const char *data, size_t len, bool stop = true);
+    bool read(char *data, size_t len, bool stop = true);
+    bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
+    bool getData(bq35100_cmd_t cmd, char *data, size_t len);
+    bool sendCntl(bq35100_cntl_t cntl);
+    bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
+
+    /**
+     * @brief Read the internal temperature of the BQ35100 chip.
+     *
+     * @param temp place to put the temperature reading.
+     * @return true if successful, otherwise false.
+     */
+    bool getInternalTemperature(int16_t *temp);
+
 };
 
 #endif // BQ35100_H

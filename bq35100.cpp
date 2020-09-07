@@ -16,11 +16,11 @@
 
 #include "BQ35100.h"
 
-BQ35100::BQ35100(int8_t address):
+BQ35100::BQ35100(uint8_t address):
     _address(address) {
 }
 
-BQ35100::BQ35100(PinName sda, PinName scl, int8_t address, uint32_t frequency):
+BQ35100::BQ35100(PinName sda, PinName scl, uint8_t address, uint32_t frequency):
     _address(address) {
     _i2c = new (_i2c_obj) I2C(sda, scl);
     _i2c->frequency(frequency);
@@ -32,9 +32,120 @@ BQ35100::~BQ35100(void) {
     }
 }
 
+bool BQ35100::write(const char *data, size_t len, bool stop) {
+    tr_debug("Sending data[%u]: %s", len, tr_array(reinterpret_cast<const uint8_t *>(data), len));
+
+    int ack = -1;
+
+    _i2c->lock();
+    ack = _i2c->write(_address, data, len, !stop);
+    _i2c->unlock();
+
+    if (ack != 0) {
+        tr_error("Write failed");
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::read(char *data, size_t len, bool stop) {
+    int ack = -1;
+
+    _i2c->lock();
+    ack = _i2c->read(_address, data, len, !stop);
+    _i2c->unlock();
+
+    if (ack != 0) {
+        return false;
+    }
+
+    tr_debug("Read data(%u): %s", len, tr_array(reinterpret_cast<uint8_t *>(data), len));
+
+    return true;
+}
+
+bool BQ35100::sendData(bq35100_cmd_t cmd, const char *data, size_t len) {
+    char *d = new char[len + 1];
+
+    if (!d) {
+        tr_error("No memory");
+        return false;
+    }
+
+    d[0] = (char)cmd;
+    memcpy(d + 1, data, len);
+
+    bool success = write(d, len + 1);
+    delete[] d;
+
+    return success;
+}
+
+bool BQ35100::getData(bq35100_cmd_t cmd, char *data, size_t len) {
+    char d[1];
+    d[0] = (char)cmd;
+
+    if (!write(d, 1, false)) {
+        return false;
+    }
+
+    return read(data, len);
+}
+
+bool BQ35100::getCntl(bq35100_cntl_t cntl, uint16_t *answer) {
+    char data[2];
+    data[0] = cntl & UCHAR_MAX;
+    data[1] = cntl >> 8;
+
+    if (!sendData(CMD_CONTROL, data, sizeof(data))) {
+        return false;
+    }
+
+    if (cntl == CNTL_CONTROL_STATUS) {
+        getData(CMD_CONTROL, data, sizeof(data));
+
+    } else {
+        getData(CMD_MAC_DATA, data, sizeof(data));
+    }
+
+    if (answer) {
+        *answer = (((uint16_t) data[1]) << 8) + data[0];
+        tr_debug("Answer: %04X", *answer);
+    }
+
+    return true;
+}
+
+bool BQ35100::sendCntl(bq35100_cntl_t cntl) {
+    char data[2];
+    data[0] = cntl & UCHAR_MAX;
+    data[1] = cntl >> 8;
+
+    return sendData(CMD_CONTROL, data, sizeof(data));
+}
+
+bool BQ35100::getInternalTemperature(int16_t *temp) {
+    char data[2];
+    int16_t temp_c = SHRT_MIN;
+
+    if (!getData(CMD_INTERNAL_TEMPERATURE, data, 2)) {
+        return false;
+    }
+
+    temp_c = ((data[1] << 8) | data[0]) / 10 - 273;
+
+    if (temp) {
+        *temp = temp_c;
+    }
+
+    tr_debug("Internal temperature: %uK = %i*C", (data[1] << 8) | data[0], temp_c);
+
+    return true;
+}
+
 bool BQ35100::init(I2C *i2c_obj, PinName gaugeEnable, uint32_t sealCodes) {
     uint16_t answer;
-    char data[4];
     _sealCodes = sealCodes;
 
     if (i2c_obj != nullptr) {
@@ -45,205 +156,127 @@ bool BQ35100::init(I2C *i2c_obj, PinName gaugeEnable, uint32_t sealCodes) {
 
     if (gaugeEnable != NC) {
         _gaugeEnable = new DigitalOut(gaugeEnable, 1);
-        ThisThread::sleep_for(GAUGE_ENABLE_SETTLING_TIME_MS);
+        ThisThread::sleep_for(1s);
     }
 
-    _i2c->lock();
-
-    // Send a control command to read the device type
-    data[0] = 0x3e;  // Set address to ManufacturerAccessControl
-    data[1] = 0x03;  // First byte of HW_VERSION sub-command (0x03)
-    data[2] = 0x00;  // Second byte of HW_VERSION sub-command (0x00) (register address will auto-increment)
-
-    if ((_i2c->write(_address, &(data[0]), 3) == 0) &&
-            getTwoBytes(0x40, &answer)) {  // Read from MACData address
-        if (answer == 0x00a8) {
-            // Read the full access codes, in case we need them
-            if (readExtendedData(0x41d0, &(data[0]), sizeof(data))) {
-                // The four bytes are the full access codes
-                _fullAccessCodes = ((uint32_t) data[0] << 24) + ((uint32_t) data[1] << 16) + ((uint32_t) data[2] << 8) + data[3];
-                tr_debug("Full access code is 0x%08lx.", _fullAccessCodes);
-
-                _ready = true;
-            }
-        }
-
-        tr_debug("Read 0x%04x as HW_VERSION, expected 0x00a8.", answer);
+    // Get device type
+    if (!getCntl(CNTL_HW_VERSION, &answer)) {
+        tr_error("Couldn't get device type");
+        return false;
     }
 
-    disableGauge();
-    _i2c->unlock();
-
-    if (_ready) {
-        tr_info("Handler initialised.");
-
-    } else {
-        tr_error("Init NOT successful.");
+    if (answer != 0x00A8) {
+        tr_error("Different device type");
+        return false;
     }
 
-    return _ready;
+    // Get security mode
+    if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
+        tr_error("Couldn't get security mode");
+        return false;
+    }
+
+    switch (answer >> 13 & 0b011) {
+        case SECURITY_MODE_FULL_ACCESS:
+            tr_info("Device is in FULL ACCESS mode");
+            break;
+
+        case SECURITY_MODE_UNSEALED:
+            tr_info("Device is in UNSEALED mode");
+            break;
+
+        case SECURITY_MODE_SEALED:
+            tr_info("Device is in SEALED mode");
+            break;
+
+        default:
+            tr_error("Invalid device mode");
+            return false;
+    }
+
+    _enabled = answer & 0b1;
+
+    return true;
 }
 
-bool BQ35100::enableGauge(bool nonVolatile) {
-    bool accumulatedCapacityOn = false;
-    bool success = false;
-    char data[3];
-    char opConfig;
-    uint16_t controlStatus;
+bool BQ35100::enableGauge() {
+    uint16_t answer;
 
-    if (_ready) {
-        if (nonVolatile) {
-            // Read the OpConfig register which is at address 0x41b1
-            if (readExtendedData(0x41b1, &opConfig, sizeof(opConfig))) {
-                tr_debug("OpConfig is 0x%02x.", opConfig);
+    if (_enabled) {
+        tr_debug("Gauge already enabled");
+        return true;
+    }
 
-                // AccumulatedCapacity is achieved by setting GMSEL 1:0 (in bits 0 and 1) to 00
-                if ((opConfig & 0x03) != 0) {
-                    opConfig &= ~0x03;
-                    // Write the new value back
-                    accumulatedCapacityOn = writeExtendedData(0x41b1, &opConfig, sizeof(opConfig));
+    if (!sendCntl(CNTL_GAUGE_START)) {
+        tr_error("Error enabling gauge");
+        return false;
+    }
 
-                    if (accumulatedCapacityOn) {
-                        tr_debug("AccumulatedCapacity enabled, OpConfig becomes 0x%02x.", opConfig);
-                    }
-
-                } else {
-                    accumulatedCapacityOn = true;
-                }
-            }
+    for (auto i = 0; i < 10; i++) {
+        if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
+            tr_error("Couldn't get device mode");
+            return false;
         }
 
-        if (accumulatedCapacityOn || !nonVolatile) {
-            if (_gaugeEnable) {
-                *_gaugeEnable = 1;
-                ThisThread::sleep_for(GAUGE_ENABLE_SETTLING_TIME_MS);
-            }
+        if (answer & 0b1) {
+            tr_info("Gauge is now enabled");
+            break;
 
-            _i2c->lock();
-            data[0] = 0x3e;  // Set address to ManufacturerAccessControl
-            data[1] = 0x11;  // First byte of GAUGE_START sub-command (0x11)
-            data[2] = 0x00;  // Second byte of GAUGE_START sub-command (0x00) (register address will auto-increment)
-
-            if (_i2c->write(_address, &(data[0]), 3) == 0) {
-                // Wait for GA bit of CONTROL_STATUS (bit 0) to become 1
-                data[0] = 0;
-
-                if (_i2c->write(_address, &(data[0]), 1) == 0) {
-                    for (int x = 0; (x < GAUGE_COMPLETE_WAIT / 10) && !success; x++) {
-                        if (getTwoBytes(0, &controlStatus)) {
-                            if ((controlStatus & 0x01) == 0x01) {
-                                success = true;
-
-                            } else {
-                                ThisThread::sleep_for(10ms);
-                            }
-
-                        } else {
-                            ThisThread::sleep_for(10ms);
-                        }
-                    }
-                }
-            }
-
-            _i2c->unlock();
+        } else {
+            tr_debug("Not yet enabled");
+            ThisThread::sleep_for(10ms);
         }
     }
 
-    return success;
+    _enabled = answer & 0b1;
+
+    if (!_enabled) {
+        tr_error("Gauge not enabled");
+    }
+
+    return _enabled;
 }
 
 bool BQ35100::disableGauge(void) {
-    bool accumulatedCapacityOn = false;
-    bool success = false;
-    char data[3];
-    char opConfig;
-    uint16_t controlStatus;
+    uint16_t answer;
 
-    if (_ready) {
-        if (isGaugeEnabled()) {
-            // Read the OpConfig register which is at address 0x41b1
-            if (readExtendedData(0x41b1, &opConfig, sizeof(opConfig))) {
-                tr_debug("OpConfig is 0x%02x.", opConfig);
+    if (!_enabled) {
+        tr_debug("Gauge already disabled");
+        return true;
+    }
 
-                // Check if AccumulatedCapacity is on
-                if ((opConfig & 0x03) == 0) {
-                    accumulatedCapacityOn = true;
-                }
+    if (!sendCntl(CNTL_GAUGE_STOP)) {
+        tr_error("Error disabling gauge");
+        return false;
+    }
 
-                // Send GAUGE_STOP
-                _i2c->lock();
-                data[0] = 0x3e;  // Set address to ManufacturerAccessControl
-                data[1] = 0x12;  // First byte of GAUGE_STOP sub-command (0x12)
-                data[2] = 0x00;  // Second byte of GAUGE_STOP sub-command (0x00) (register address will auto-increment)
-
-                if (_i2c->write(_address, &(data[0]), 3) == 0) {
-                    // Wait for GA bit of CONTROL_STATUS (bit 0) to become 0 and,
-                    // if AccumulatedCapacity was on, wait for G_DONE
-                    // (bit 6 in CONTROL_STATUS) to be set
-                    data[0] = 0;
-
-                    if (_i2c->write(_address, &(data[0]), 1) == 0) {
-                        for (int x = 0; (x < GAUGE_COMPLETE_WAIT / 10) && !success; x++) {
-                            if (getTwoBytes(0, &controlStatus)) {
-                                if ((controlStatus & 0x01) == 0) {
-                                    if (accumulatedCapacityOn) {
-                                        if (((controlStatus >> 6) & 0x01) == 0x01) {
-                                            success = true;
-                                            tr_debug("AccumulatedCapacity data written to non-volatile memory.");
-
-                                        } else {
-                                            ThisThread::sleep_for(10ms);
-                                        }
-
-                                    } else {
-                                        success = true;
-                                    }
-
-                                } else {
-                                    ThisThread::sleep_for(10ms);
-                                }
-
-                            } else {
-                                ThisThread::sleep_for(10ms);
-                            }
-                        }
-                    }
-                }
-
-                _i2c->unlock();
-            }
-
-        } else {
-            success = true;
+    for (auto i = 0; i < 10; i++) {
+        if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
+            tr_error("Couldn't get device mode");
+            return false;
         }
 
-        if (_gaugeEnable) {
-            *_gaugeEnable = 0;
+        if (!(answer & 0b1)) {
+            tr_info("Gauge is now disabled");
+            break;
+
+        } else {
+            tr_debug("Not yet disabled");
+            ThisThread::sleep_for(10ms);
         }
     }
 
-    return success;
+    _enabled = answer & 0b1;
+
+    if (_enabled) {
+        tr_error("Gauge not disabled");
+    }
+
+    return !_enabled;
 }
 
 bool BQ35100::isGaugeEnabled(void) {
-    bool gaugeEnabled = false;
-    char data[1];
-    uint16_t controlStatus;
-
-    if (_ready) {
-        // Check the GA bit (bit 0) in CONTROL_STATUS
-        data[0] = 0;
-
-        if ((_i2c->write(_address, &(data[0]), 1) == 0) && getTwoBytes(0, &controlStatus)) {
-            tr_debug("Read 0x%04x as CONTROL_STATUS.", controlStatus);
-
-            if ((controlStatus & 0x01) == 0x01) {
-                gaugeEnabled = true;
-            }
-        }
-    }
-
-    return gaugeEnabled;
+    return _enabled;
 }
 
 bool BQ35100::setDesignCapacity(uint32_t capacityMAh) {
@@ -257,7 +290,7 @@ bool BQ35100::setDesignCapacity(uint32_t capacityMAh) {
         data[1] = capacityMAh;  // Lower byte of design capacity
 
         // Write to the "Cell Design Capacity mAh" address in data flash
-        if (writeExtendedData(0x41fe, &(data[0]), sizeof(data))) {
+        if (writeExtendedData(0x41fe, data, sizeof(data))) {
             success = true;
             tr_debug("designed cell capacity set to %lu mAh.", capacityMAh);
         }
@@ -268,106 +301,71 @@ bool BQ35100::setDesignCapacity(uint32_t capacityMAh) {
     return success;
 }
 
-bool BQ35100::getDesignCapacity(uint32_t *pCapacityMAh) {
-    bool success = false;
-    uint16_t data;
+bool BQ35100::getDesignCapacity(uint16_t *capacity) {
+    char data[2];
 
-    if (_ready) {
-        _i2c->lock();
-
-        // Read from the DesignCapacity address
-        if (getTwoBytes(0x3c, &data)) {
-            success = true;
-
-            // The answer is in mAh
-            if (pCapacityMAh) {
-                *pCapacityMAh = data;
-            }
-
-            tr_info("Designed cell capacity is %d mAh.", data);
-        }
-
+    if (!getData(CMD_DESIGN_CAPACITY, data, 2)) {
+        return false;
     }
 
-    return success;
+    if (capacity) {
+        *capacity = (data[1] << 8) | data[0];
+    }
+
+    tr_info("Designed cell capacity is %u mAh.", (data[1] << 8) | data[0]);
+
+    return true;
 }
 
-bool BQ35100::getTemperature(int32_t *pTemperatureC) {
-    bool success = false;
-    int32_t temperatureC = 0;
-    uint16_t data;
+bool BQ35100::getTemperature(int16_t *temp) {
+    char data[2];
+    int16_t temp_c = SHRT_MIN;
 
-    if (_ready && makeAdcReading()) {
-        _i2c->lock();
-
-        // Read from the temperature register address
-        if (getTwoBytes(0x06, &data)) {
-            success = true;
-
-            // The answer is in units of 0.1 K, so convert to C
-            temperatureC = ((int32_t) data / 10) - 273;
-
-            if (pTemperatureC) {
-                *pTemperatureC = temperatureC;
-            }
-
-            tr_info("Chip temperature %.1f K, so %li *C.", ((float) data) / 10, temperatureC);
-        }
-
-        _i2c->unlock();
+    if (!getData(CMD_TEMPERATURE, data, 2)) {
+        return false;
     }
 
-    return success;
+    temp_c = ((data[1] << 8) | data[0]) / 10 - 273;
+
+    if (temp) {
+        *temp = temp_c;
+    }
+
+    tr_debug("Internal temperature: %uK = %i*C", (data[1] << 8) | data[0], temp_c);
+
+    return true;
 }
 
-bool BQ35100::getVoltage(int32_t *pVoltageMV) {
-    bool success = false;
-    uint16_t data = 0;
+bool BQ35100::getVoltage(uint16_t *voltage) {
+    char data[2];
 
-    if (_ready && makeAdcReading()) {
-        _i2c->lock();
-
-        // Read from the voltage register address
-        if (getTwoBytes(0x08, &data)) {
-            success = true;
-
-            // The answer is in mV
-            if (pVoltageMV) {
-                *pVoltageMV = (int32_t) data;
-            }
-
-            tr_info("Battery voltage %.3f V.", ((float) data) / 1000);
-        }
-
-        _i2c->unlock();
+    if (!getData(CMD_VOLTAGE, data, 2)) {
+        return false;
     }
 
-    return success;
+    if (voltage) {
+        *voltage = (data[1] << 8) | data[0];
+    }
+
+    tr_debug("Battery voltage: %umV", (data[1] << 8) | data[0]);
+
+    return true;
 }
 
-bool BQ35100::getCurrent(int32_t *pCurrentMA) {
-    bool success = false;
-    int32_t currentMA = 0;
-    uint16_t data = 0;
+bool BQ35100::getCurrent(uint16_t *current) {
+    char data[2];
 
-    if (_ready && makeAdcReading()) {
-        _i2c->lock();
-
-        // Read from the average current register address
-        if (getTwoBytes(0x0c, &data)) {
-            success = true;
-
-            if (pCurrentMA) {
-                *pCurrentMA = currentMA;
-            }
-
-            tr_info("Current %d mA.", (int) currentMA);
-        }
-
-        _i2c->unlock();
+    if (!getData(CMD_CURRENT, data, 2)) {
+        return false;
     }
 
-    return success;
+    if (current) {
+        *current = (data[1] << 8) | data[0];
+    }
+
+    tr_debug("Current: %umA", (data[1] << 8) | data[0]);
+
+    return true;
 }
 
 bool BQ35100::getUsedCapacity(uint32_t *pCapacityUAh) {
@@ -407,7 +405,7 @@ bool BQ35100::getUsedCapacity(uint32_t *pCapacityUAh) {
 
 bool BQ35100::getRemainingCapacity(uint32_t *pCapacityUAh) {
     bool success = false;
-    uint32_t designCapacityUAh;
+    /* uint32_t designCapacityUAh;
     uint32_t usedCapacityUAh;
 
     // First, get the designed capacity
@@ -431,14 +429,14 @@ bool BQ35100::getRemainingCapacity(uint32_t *pCapacityUAh) {
             tr_info("Battery capacity remaining %lu uAh (from a designed capacity of %lu uAh).",
                     designCapacityUAh - usedCapacityUAh, designCapacityUAh);
         }
-    }
+    } */
 
     return success;
 }
 
 bool BQ35100::getRemainingPercentage(int32_t *pBatteryPercentage) {
     bool success = false;
-    uint32_t designCapacityUAh;
+    /* uint32_t designCapacityUAh;
     uint32_t usedCapacityUAh;
     int32_t batteryPercentage;
 
@@ -464,7 +462,7 @@ bool BQ35100::getRemainingPercentage(int32_t *pBatteryPercentage) {
 
             tr_info("Battery capacity remaining %li%%.", batteryPercentage);
         }
-    }
+    } */
 
     return success;
 }
@@ -481,7 +479,7 @@ bool BQ35100::newBattery(uint32_t capacityMAh) {
             data[1] = 0x13;  // First byte of NEW_BATTERY sub-command (0x13)
             data[2] = 0xA6;  // Second byte of NEW_BATTERY sub-command (0xA6) (register address will auto-increment)
 
-            if (_i2c->write(_address, &(data[0]), 3) == 0) {
+            if (_i2c->write(_address, data, 3) == 0) {
                 success = true;
 
                 tr_info("New battery set.");
@@ -534,7 +532,7 @@ bool BQ35100::advancedSendControlWord(uint16_t controlWord, uint16_t *pDataRetur
         data[1] = (char) controlWord;        // First byte of controlWord
         data[2] = (char)(controlWord >> 8);  // Second byte of controlWord
 
-        if (_i2c->write(_address, &(data[0]), 3) == 0) {
+        if (_i2c->write(_address, data, 3) == 0) {
             // Read the two bytes returned if requested
             if (pDataReturned != NULL) {
                 if (getTwoBytes(0x40, pDataReturned)) { // Read from MACData
@@ -626,7 +624,7 @@ bool BQ35100::advancedReset(void) {
             data[1] = 0x41;  // First byte of RESET sub-command (0x41)
             data[2] = 0x00;  // Second byte of RESET sub-command (0x00) (register address will auto-increment)
 
-            if (_i2c->write(_address, &(data[0]), 3) == 0) {
+            if (_i2c->write(_address, data, 3) == 0) {
                 success = true;
                 tr_info("Chip hard reset.");
             }
@@ -653,7 +651,7 @@ bool BQ35100::getTwoBytes(uint8_t registerAddress, uint16_t *pBytes) {
         data[2] = 0;
 
         // Send a command to read from registerAddress
-        if ((_i2c->write(_address, &(data[0]), 1, true) == 0) &&
+        if ((_i2c->write(_address, data, 1, true) == 0) &&
                 (_i2c->read(_address, &(data[1]), 2) == 0)) {
             success = true;
 
@@ -728,17 +726,17 @@ bool BQ35100::readExtendedData(uint16_t address, char *pData, int32_t length) {
             data[0] = 0x61;
             data[1] = 0;
 
-            if (_i2c->write(_address, &(data[0]), 2) == 0) {
+            if (_i2c->write(_address, data, 2) == 0) {
                 // Write address to ManufacturerAccessControl (0x3e)
                 data[0] = 0x3e;
                 data[1] = (char) address;
                 data[2] = (char)(address >> 8);
 
-                if (_i2c->write(_address, &(data[0]), 3) == 0) {
+                if (_i2c->write(_address, data, 3) == 0) {
                     // Read the address from ManufacturerAccessControl (0x3e then 0x3f),
                     // data from MACData (0x40 to 0x5f), checksum from MACDataSum (0x60)
                     // and length from MACDataLen (0x61)
-                    if ((_i2c->write(_address, &(data[0]), 1, true) == 0) &&
+                    if ((_i2c->write(_address, data, 1, true) == 0) &&
                             (_i2c->read(_address, &(block[0]), sizeof(block)) == 0)) {
                         // Check that the address matches
                         if ((block[0] == (char) address) && (block[1] == (char)(address >> 8))) {
@@ -803,7 +801,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *pData, int32_t len
             data[0] = 0x61;
             data[1] = 0;
 
-            if (_i2c->write(_address, &(data[0]), 2) == 0) {
+            if (_i2c->write(_address, data, 2) == 0) {
                 // Start write at ManufacturerAccessControl (0x3e)
                 data[0] = 0x3e;
                 // Next two bytes are the address we will write to
@@ -812,22 +810,22 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *pData, int32_t len
                 // Remaining bytes are the data bytes we wish to write
                 memcpy(&(data[3]), pData, length);
 
-                if (_i2c->write(_address, &(data[0]), 3 + length) == 0) {
+                if (_i2c->write(_address, data, 3 + length) == 0) {
                     // Compute the checksum and write it to MACDataSum (0x60)
                     data[1] = computeChecksum(&(data[1]), length + 2);
                     data[0] = 0x60;
 
-                    if (_i2c->write(_address, &(data[0]), 2) == 0) {
+                    if (_i2c->write(_address, data, 2) == 0) {
                         // Write 4 + length to MACDataLen (0x61)
                         data[1] = length + 4;
                         data[0] = 0x61;
 
-                        if (_i2c->write(_address, &(data[0]), 2) == 0) {
+                        if (_i2c->write(_address, data, 2) == 0) {
                             // Read the control status register to see if a bad
                             // flash write has been detected (bit 15)
                             data[0] = 0;
 
-                            if ((_i2c->write(_address, &(data[0]), 1) == 0) && getTwoBytes(0, &controlStatus) &&
+                            if ((_i2c->write(_address, data, 1) == 0) && getTwoBytes(0, &controlStatus) &&
                                     (((controlStatus >> 15) & 0x01) != 0x01)) {
                                 success = true;
                             }
@@ -871,7 +869,7 @@ BQ35100::security_mode_t BQ35100::getSecurityMode(void) {
     // Read the control status register
     data[0] = 0;
 
-    if ((_i2c->write(_address, &(data[0]), 1) == 0) &&
+    if ((_i2c->write(_address, data, 1) == 0) &&
             getTwoBytes(0, &controlStatus)) {
         // Bits 13 and 14 of the high byte represent the security status,
         // 01 = full access
@@ -902,7 +900,7 @@ bool BQ35100::setSecurityMode(security_mode_t securityMode) {
                         // Just seal the chip
                         data[1] = 0x20;  // First byte of SEALED sub-command (0x20)
                         data[2] = 0x00;  // Second byte of SEALED sub-command (0x00) (register address will auto-increment)
-                        _i2c->write(_address, &(data[0]), 3);
+                        _i2c->write(_address, data, 3);
                         break;
 
                     case SECURITY_MODE_FULL_ACCESS:
@@ -910,19 +908,19 @@ bool BQ35100::setSecurityMode(security_mode_t securityMode) {
                         // in TWO writes
                         data[2] = (char)(_fullAccessCodes >> 24);
                         data[1] = (char)(_fullAccessCodes >> 16);
-                        _i2c->write(_address, &(data[0]), 3);
+                        _i2c->write(_address, data, 3);
                         data[2] = (char)(_fullAccessCodes >> 8);
                         data[1] = (char) _fullAccessCodes;
-                        _i2c->write(_address, &(data[0]), 3);
+                        _i2c->write(_address, data, 3);
                         break;
 
                     case SECURITY_MODE_UNSEALED:
                         data[2] = (char)(_sealCodes >> 24);
                         data[1] = (char)(_sealCodes >> 16);
-                        _i2c->write(_address, &(data[0]), 3);
+                        _i2c->write(_address, data, 3);
                         data[2] = (char)(_sealCodes >> 8);
                         data[1] = (char) _sealCodes;
-                        _i2c->write(_address, &(data[0]), 3);
+                        _i2c->write(_address, data, 3);
                         break;
 
                     case SECURITY_MODE_UNKNOWN:
