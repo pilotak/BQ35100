@@ -257,6 +257,10 @@ bool BQ35100::disableGauge(void) {
         tr_error("Gauge not disabled");
     }
 
+    if (_gauge_enable_pin) {
+        _gauge_enable_pin->write(0);
+    }
+
     return !_enabled;
 }
 
