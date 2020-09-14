@@ -130,7 +130,7 @@ bool BQ35100::sendCntl(bq35100_cntl_t cntl) {
 
 bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
     uint16_t answer;
-    bool success;
+    bool success = false;
 
     if (i2c_obj != nullptr) {
         _i2c = i2c_obj;
@@ -191,7 +191,6 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
 
 bool BQ35100::enableGauge() {
     char data[2];
-    uint16_t answer;
 
     if (_enabled) {
         tr_warning("Gauge already enabled");
