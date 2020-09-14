@@ -1,0 +1,13 @@
+{
+  "name": "BQ35100",
+  "config": {
+    "init_retry": {
+      "help": "How many times repeat the initialization (in 40ms intervals)",
+      "value": 25
+    },
+    "retry": {
+      "help": "How many times repeat specific calls (in 10ms intervals)",
+      "value": 10
+    }
+  }
+}

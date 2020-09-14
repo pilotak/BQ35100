@@ -96,6 +96,7 @@ bool BQ35100::getData(bq35100_cmd_t cmd, char *data, size_t len) {
 }
 
 bool BQ35100::getCntl(bq35100_cntl_t cntl, uint16_t *answer) {
+    bool success = false;
     char data[2];
     data[0] = cntl & UCHAR_MAX;
     data[1] = cntl >> 8;
@@ -105,18 +106,18 @@ bool BQ35100::getCntl(bq35100_cntl_t cntl, uint16_t *answer) {
     }
 
     if (cntl == CNTL_CONTROL_STATUS) {
-        getData(CMD_CONTROL, data, sizeof(data));
+        success = getData(CMD_CONTROL, data, sizeof(data));
 
     } else {
-        getData(CMD_MAC_DATA, data, sizeof(data));
+        success = getData(CMD_MAC_DATA, data, sizeof(data));
     }
 
-    if (answer) {
+    if (success && answer) {
         *answer = (((uint16_t) data[1]) << 8) + data[0];
         tr_debug("Answer: %04X", *answer);
     }
 
-    return true;
+    return success;
 }
 
 bool BQ35100::sendCntl(bq35100_cntl_t cntl) {
@@ -129,6 +130,7 @@ bool BQ35100::sendCntl(bq35100_cntl_t cntl) {
 
 bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
     uint16_t answer;
+    bool success;
 
     if (i2c_obj != nullptr) {
         _i2c = i2c_obj;
@@ -138,13 +140,16 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
 
     if (gauge_enable_pin != NC) {
         _gauge_enable_pin = new DigitalOut(gauge_enable_pin, 1);
-        ThisThread::sleep_for(1s);
+        ThisThread::sleep_for(40ms);
     }
 
     // Get device type
-    if (!getCntl(CNTL_HW_VERSION, &answer)) {
-        tr_error("Couldn't get device type");
-        return false;
+    for (auto i = 0; (i < MBED_CONF_BQ35100_INIT_RETRY) && !success; i++) {
+        success = getCntl(CNTL_HW_VERSION, &answer);
+
+        if (!success) {
+            ThisThread::sleep_for(40ms);
+        }
     }
 
     if (answer != 0x00A8) {
@@ -185,6 +190,7 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
 }
 
 bool BQ35100::enableGauge() {
+    char data[2];
     uint16_t answer;
 
     if (_enabled) {
@@ -197,13 +203,20 @@ bool BQ35100::enableGauge() {
         return false;
     }
 
-    for (auto i = 0; i < 10; i++) {
-        if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
+    data[0] = (char)CMD_CONTROL;
+
+    if (!write(data, 1)) {
+        tr_error("Error test");
+        return false;
+    }
+
+    for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
+        if (!read(data, sizeof(data))) {
             tr_error("Couldn't get device mode");
             return false;
         }
 
-        if (answer & 0b1) {
+        if (data[0] & 0b1) {
             tr_info("Gauge is now enabled");
             break;
 
@@ -213,7 +226,7 @@ bool BQ35100::enableGauge() {
         }
     }
 
-    _enabled = answer & 0b1;
+    _enabled = data[0] & 0b1;
 
     if (!_enabled) {
         tr_error("Gauge not enabled");
@@ -223,22 +236,24 @@ bool BQ35100::enableGauge() {
 }
 
 bool BQ35100::disableGauge(void) {
+    bool success = false;
     uint16_t answer;
 
     if (!_enabled) {
         tr_warning("Gauge already disabled");
-        return true;
+        success = true;
+        goto END;
     }
 
     if (!sendCntl(CNTL_GAUGE_STOP)) {
         tr_error("Error disabling gauge");
-        return false;
+        goto END;
     }
 
-    for (auto i = 0; i < 10; i++) {
+    for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
         if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
             tr_error("Couldn't get device mode");
-            return false;
+            goto END;
         }
 
         if (!(answer & 0b1)) {
@@ -255,13 +270,18 @@ bool BQ35100::disableGauge(void) {
 
     if (_enabled) {
         tr_error("Gauge not disabled");
+
+    } else {
+        success = true;
     }
+
+END:
 
     if (_gauge_enable_pin) {
         _gauge_enable_pin->write(0);
     }
 
-    return !_enabled;
+    return success;
 }
 
 bool BQ35100::isGaugeEnabled(void) {
@@ -765,7 +785,7 @@ bool BQ35100::setSecurityMode(security_mode_t new_security) {
     // For reasons that aren't clear, the BQ35100 sometimes refuses
     // to change security mode if a previous security mode change
     // happend only a few seconds ago, hence the retry here
-    for (auto x = 0; (x < SET_SECURITY_MODE_RETRY) && !success; x++) {
+    for (auto x = 0; (x < MBED_CONF_BQ35100_RETRY) && !success; x++) {
         data[0] = CMD_MAC;
 
         switch (new_security) {

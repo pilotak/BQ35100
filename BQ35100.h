@@ -30,9 +30,6 @@ using namespace std::chrono;
 /** The default seal codes (step 1 in the higher word, step 2 the lower word), NOT byte reversed */
 #define BQ35100_DEFAULT_SEAL_CODES 0x04143672
 
-/** How long to wait for a security mode change to succeed */
-#define SET_SECURITY_MODE_RETRY 5 // seconds
-
 class BQ35100 {
   public:
     typedef enum {
@@ -220,6 +217,23 @@ class BQ35100 {
      */
     bool useInternalTemp(bool use);
 
+    /**
+     * @brief Get the security mode of the chip
+     *
+     * @note _i2c should be locked before this is called
+     * @return the security mode
+     */
+    security_mode_t getSecurityMode(void);
+
+    /**
+     * @brief Set the security mode of the chip
+     *
+     * @note _i2c should be locked before this is called
+     * @param new_security the security mode to set
+     * @return true if successful, otherwise false
+     */
+    bool setSecurityMode(security_mode_t new_security);
+
   protected:
     typedef enum {
         CMD_CONTROL = 0x00,
@@ -302,23 +316,6 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool writeExtendedData(uint16_t address, const char *data, size_t len);
-
-    /**
-     * @brief Get the security mode of the chip
-     *
-     * @note _i2c should be locked before this is called
-     * @return the security mode
-     */
-    security_mode_t getSecurityMode(void);
-
-    /**
-     * @brief Set the security mode of the chip
-     *
-     * @note _i2c should be locked before this is called
-     * @param new_security the security mode to set
-     * @return true if successful, otherwise false
-     */
-    bool setSecurityMode(security_mode_t new_security);
 
     bool write(const char *data, size_t len, bool stop = true);
     bool read(char *data, size_t len, bool stop = true);
