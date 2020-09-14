@@ -502,7 +502,7 @@ bool BQ35100::setGaugeMode(gauge_mode_t gauge_mode) {
 
     if (gauge_mode == UNKNOWN_MODE) {
         tr_error("Invalid gauge mode");
-        return false;
+        MBED_ASSERT(false);
     }
 
     // Get the Operation Config A
@@ -754,7 +754,7 @@ bool BQ35100::setSecurityMode(security_mode_t new_security) {
     char data[4];
 
     if (new_security == _security_mode) {
-        return true;
+        return true; // We are already in this mode
     }
 
     if (new_security == SECURITY_UNKNOWN) {
@@ -774,6 +774,11 @@ bool BQ35100::setSecurityMode(security_mode_t new_security) {
                 break;
 
             case SECURITY_FULL_ACCESS: {
+                // Unseal first if in Sealed mode
+                if (_security_mode == SECURITY_SEALED && !setSecurityMode(SECURITY_UNSEALED)) {
+                    return false;
+                }
+
                 if (!readExtendedData(0X41D0, data, sizeof(data))) {
                     tr_error("Could not get full access codes");
                     return false;
@@ -793,7 +798,12 @@ bool BQ35100::setSecurityMode(security_mode_t new_security) {
             }
             break;
 
-            case SECURITY_UNSEALED:
+            case SECURITY_UNSEALED: {
+                // Seal first if in Full Access mode
+                if (_security_mode == SECURITY_FULL_ACCESS && !setSecurityMode(SECURITY_SEALED)) {
+                    return false;
+                }
+
                 data[2] = (_seal_codes >> 24) & 0xFF;
                 data[1] = (_seal_codes >> 16) & 0xFF;
                 write(data, 3);
@@ -801,7 +811,8 @@ bool BQ35100::setSecurityMode(security_mode_t new_security) {
                 data[2] = (_seal_codes >> 8) & 0xFF;
                 data[1] = _seal_codes & 0xFF;
                 write(data, 3);
-                break;
+            }
+            break;
 
             case SECURITY_UNKNOWN:
             default:
