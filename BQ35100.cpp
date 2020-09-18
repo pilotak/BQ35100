@@ -163,7 +163,7 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
         return false;
     }
 
-    _security_mode = (security_mode_t)((answer >> 13) & 0b011);
+    _security_mode = (bq35100_security_t)((answer >> 13) & 0b011);
 
     switch ((answer >> 13) & 0b011) {
         case SECURITY_FULL_ACCESS:
@@ -189,9 +189,7 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
     return true;
 }
 
-bool BQ35100::enableGauge() {
-    char data[2];
-
+bool BQ35100::startGauge(void) {
     if (_enabled) {
         tr_warning("Gauge already enabled");
         return true;
@@ -202,10 +200,40 @@ bool BQ35100::enableGauge() {
         return false;
     }
 
+    _enabled = waitforStatus(BQ3500_GA_BIT_MASK, BQ3500_GA_BIT_MASK);
+
+    if (!_enabled) {
+        tr_info("Gauge enabled");
+
+    } else {
+        tr_error("Gauge not enabled");
+    }
+
+    return _enabled;
+}
+
+bool BQ35100::enterCalibrationMode(bool enable) {
+    if (!sendCntl(enable ? CNTL_ENTER_CAL : CNTL_EXIT_CAL)) {
+        tr_error("Error entering calibration mode");
+        return false;
+    }
+
+    if (!waitforStatus(enable ? BQ3500_CAL_MODE_BIT_MASK : 0, BQ3500_CAL_MODE_BIT_MASK)) {
+        tr_error("Calibration error/timeout");
+        return false;
+    }
+
+    tr_info("Calibration mode %s", enabled ? "enabled", "disabled");
+
+    return true;
+}
+
+bool BQ35100::waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait) {
+    char data[2];
     data[0] = (char)CMD_CONTROL;
 
     if (!write(data, 1)) {
-        tr_error("Error test");
+        tr_error("Error writing data");
         return false;
     }
 
@@ -215,63 +243,193 @@ bool BQ35100::enableGauge() {
             return false;
         }
 
-        if (data[0] & 0b1) {
-            tr_info("Gauge is now enabled");
-            break;
+        if ((((data[1] << 8) | data[0]) & mask) == expected) {
+            tr_debug("Status match");
+            return true;
 
         } else {
-            tr_debug("Not yet enabled");
-            ThisThread::sleep_for(10ms);
+            tr_debug("Status not yet in requested state");
+            ThisThread::sleep_for(wait);
         }
     }
 
-    _enabled = data[0] & 0b1;
+    return false;
+}
+
+bool BQ35100::performCCOffset(void) {
+    if (!enterCalibrationMode(true)) {
+        return false;
+    }
+
+    while (true) {
+        if (!sendCntl(CNTL_CC_OFFSET)) {
+            tr_error("Error sending CC offset");
+            return false;
+        }
+
+        if (!waitforStatus(BQ3500_CCA_BIT_MASK, BQ3500_CCA_BIT_MASK)) { // wait for CCA == 1
+            tr_error("Status: CCA != 1");
+            return false;
+        }
+    }
+
+    tr_info("Performing CC offset");
+    ThisThread::sleep_for(500ms);
+
+    if (!waitforStatus(0, BQ3500_CCA_BIT_MASK, 500ms)) { // wait for CCA == 0
+        tr_error("Status: CCA != 0");
+        return false;
+    }
+
+    if (!sendCntl(CNTL_CC_OFFSET_SAVE)) {
+        tr_error("Error sending CC offset save");
+        return false;
+    }
+
+    tr_info("CC offset saved");
+
+    if (!enterCalibrationMode(true)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::performBoardOffset(void) {
+    if (!enterCalibrationMode(true)) {
+        return false;
+    }
+
+    while (true) {
+        if (!sendCntl(CNTL_BOARD_OFFSET)) {
+            tr_error("Error sending board offset");
+            return false;
+        }
+
+        if (!waitforStatus(BQ3500_BCA_BIT_MASK | BQ3500_CCA_BIT_MASK,
+                           BQ3500_BCA_BIT_MASK | BQ3500_CCA_BIT_MASK)) { // wait for CCA == 1 & BCA == 1
+            tr_error("Status: CCA != 1 || BCA != 1");
+            return false;
+        }
+    }
+
+    tr_info("Performing board offset");
+    ThisThread::sleep_for(500ms);
+
+    if (!waitforStatus(0, BQ3500_BCA_BIT_MASK, 500ms)) { // wait for BCA == 0
+        tr_error("Status: BCA != 0");
+        return false;
+    }
+
+    tr_info("Board offset OK");
+
+    if (!enterCalibrationMode(true)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, uint16_t *result) {
+    char data[2];
+    uint8_t adc_counter_prev = 0;
+    uint8_t counter = 0;
+    uint64_t avg = 0;
+
+    if (!enterCalibrationMode(true)) {
+        return false;
+    }
+
+    while (true) {
+        ThisThread::sleep_for(200ms);
+
+        if (!getData(CMD_CAL_COUNT, data, 1)) {
+            tr_error("Could not get cal count");
+            return false;
+        }
+
+        if (adc_counter_prev == data[0]) {
+            continue;
+        }
+
+        adc_counter_prev = data[0];
+
+        if (!getData((bq35100_cmd_t)address, data, sizeof(data))) {
+            tr_error("Could not get data");
+            return false;
+        }
+
+        avg += ((data[0]) << 8) + data[1];
+        counter++;
+
+        if (counter == 4) {
+            break;
+        }
+    }
+
+    if (result) {
+        *result = (uint16_t)(avg / 4);
+    }
+
+
+    if (!enterCalibrationMode(false)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::stopGauge(void) {
+    if (!_enabled) {
+        tr_warning("Gauge already disabled");
+        return true;
+    }
+
+    if (!sendCntl(CNTL_GAUGE_STOP)) {
+        tr_error("Error disabling gauge");
+        return false;
+    }
+
+    _enabled = !waitforStatus(0, BQ3500_GA_BIT_MASK);
 
     if (!_enabled) {
-        tr_error("Gauge not enabled");
+        tr_info("Gauge disabled");
+
+    } else {
+        tr_error("Gauge not disabled");
     }
 
     return _enabled;
 }
 
+
 bool BQ35100::disableGauge(void) {
     bool success = false;
     uint16_t answer;
 
-    if (!_enabled) {
-        tr_warning("Gauge already disabled");
-        success = true;
-        goto END;
-    }
-
-    if (!sendCntl(CNTL_GAUGE_STOP)) {
-        tr_error("Error disabling gauge");
-        goto END;
-    }
-
     for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
         if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
             tr_error("Couldn't get device mode");
-            goto END;
+            return false;
         }
 
-        if (!(answer & 0b1)) {
-            tr_info("Gauge is now disabled");
+        if (answer & BQ3500_GA_BIT_MASK) {
+            tr_warning("Gauge is switched on, turning off");
+
+            if (!stopGauge()) {
+                goto END;
+            }
+        }
+
+        if (answer & BQ3500_G_DONE_BIT_MASK) {
+            tr_info("Gauge can be powered down");
+            success = true;
             break;
 
         } else {
-            tr_debug("Not yet disabled");
+            tr_debug("Can't be powered down yet");
             ThisThread::sleep_for(10ms);
         }
-    }
-
-    _enabled = answer & 0b1;
-
-    if (_enabled) {
-        tr_error("Gauge not disabled");
-
-    } else {
-        success = true;
     }
 
 END:
@@ -281,6 +439,66 @@ END:
     }
 
     return success;
+}
+
+bool BQ35100::setEosDataSeconds(uint8_t seconds) {
+    char data[1];
+    data[0] = seconds;
+
+    if (!writeExtendedData(0x4255, data, sizeof(data))) {
+        tr_error("Could not set R data seconds");
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::getBatteryStatus(uint8_t *status) {
+    char data[1];
+
+    if (!getData(CMD_BATTERY_STATUS, data, sizeof(data))) {
+        tr_error("Could not get battery status");
+        return false;
+    }
+
+    if (status) {
+        *status = data[0];
+    }
+
+    tr_info("Battery status: %02X", data[0]);
+
+    return true;
+}
+
+bool BQ35100::setBatteryAlert(uint8_t alert) {
+    char data[1];
+    data[0] = alert;
+
+    if (!writeExtendedData(0x41B2, data, sizeof(data))) {
+        tr_error("Could not set battery alert");
+        return false;
+    }
+
+    tr_info("Battery alert set to: %02X", alert);
+
+    return true;
+}
+
+bool BQ35100::getBatteryAlert(uint8_t *alert) {
+    char data[1];
+
+    if (!getData(CMD_BATTERY_ALERT, data, sizeof(data))) {
+        tr_error("Could not battery alert");
+        return false;
+    }
+
+    if (alert) {
+        *alert = data[0];
+    }
+
+    tr_info("Battery alert: %02X", data[0]);
+
+    return true;
 }
 
 bool BQ35100::isGaugeEnabled(void) {
@@ -363,7 +581,7 @@ bool BQ35100::getInternalTemperature(int16_t *temp) {
 bool BQ35100::getVoltage(uint16_t *voltage) {
     char data[2];
 
-    if (!getData(CMD_VOLTAGE, data, 2)) {
+    if (!getData(CMD_VOLTAGE, data, sizeof(data))) {
         tr_error("Could not voltage reading");
         return false;
     }
@@ -494,7 +712,7 @@ bool BQ35100::newBattery(uint16_t capacity) {
 
 bool BQ35100::reset(void) {
     bool success = false;
-    security_mode_t prev_security_mode = _security_mode;
+    bq35100_security_t prev_security_mode = _security_mode;
 
     if (_security_mode == SECURITY_UNKNOWN) {
         tr_error("Security mode unknown");
@@ -516,7 +734,7 @@ bool BQ35100::reset(void) {
     return success;
 }
 
-bool BQ35100::setGaugeMode(gauge_mode_t gauge_mode) {
+bool BQ35100::setGaugeMode(bq35100_gauge_mode_t gauge_mode) {
     char op[1];
 
     if (gauge_mode == UNKNOWN_MODE) {
@@ -530,7 +748,7 @@ bool BQ35100::setGaugeMode(gauge_mode_t gauge_mode) {
     }
 
     // Set the mode (GMSEL 1:0)
-    if ((gauge_mode_t)(op[0] & 0b11) != gauge_mode) {
+    if ((bq35100_gauge_mode_t)(op[0] & 0b11) != gauge_mode) {
         op[0] &= ~0b11;
         op[0] |= (char)gauge_mode;
 
@@ -543,6 +761,21 @@ bool BQ35100::setGaugeMode(gauge_mode_t gauge_mode) {
     } else {
         tr_warning("Gauge mode already set");
     }
+
+    return true;
+}
+
+bool BQ35100::setUnderTemperature(int16_t min) {
+    char data[2];
+    data[0] = min & UCHAR_MAX;
+    data[1] = min >> 8;
+
+    if (!writeExtendedData(0x41E3, data, sizeof(data))) {
+        tr_error("Sending under temperature temp failed");
+        return false;
+    }
+
+    tr_info("Under temperature set to: %i", min);
 
     return true;
 }
@@ -599,7 +832,7 @@ bool BQ35100::readExtendedData(uint16_t address, char *response, size_t len) {
     char data[32 + 2 + 2]; // 32 bytes of data, 2 bytes of address,
 
     bool success = false;
-    security_mode_t prev_security_mode = _security_mode;
+    bq35100_security_t prev_security_mode = _security_mode;
 
     if (_security_mode == SECURITY_UNKNOWN) {
         tr_error("Security mode unknown");
@@ -669,7 +902,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
     char d[32 + 3]; // Max data len + header
 
     bool success = false;
-    security_mode_t prev_security_mode = _security_mode;
+    bq35100_security_t prev_security_mode = _security_mode;
 
     if (_security_mode == SECURITY_UNKNOWN) {
         tr_error("Security mode unknown");
@@ -739,7 +972,7 @@ END:
     return success;
 }
 
-BQ35100::security_mode_t BQ35100::getSecurityMode(void) {
+BQ35100::bq35100_security_t BQ35100::getSecurityMode(void) {
     uint16_t answer;
 
     if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
@@ -765,10 +998,10 @@ BQ35100::security_mode_t BQ35100::getSecurityMode(void) {
             return SECURITY_UNKNOWN;
     }
 
-    return (security_mode_t)((answer >> 13) & 0b011);
+    return (bq35100_security_t)((answer >> 13) & 0b011);
 }
 
-bool BQ35100::setSecurityMode(security_mode_t new_security) {
+bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
     bool success = false;
     char data[4];
 

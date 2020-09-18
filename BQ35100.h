@@ -30,6 +30,12 @@ using namespace std::chrono;
 /** The default seal codes (step 1 in the higher word, step 2 the lower word), NOT byte reversed */
 #define BQ35100_DEFAULT_SEAL_CODES 0x04143672
 
+#define BQ3500_GA_BIT_MASK       0b0000000000000001
+#define BQ3500_G_DONE_BIT_MASK   0b0000000001000000
+#define BQ3500_CCA_BIT_MASK      0b0000010000000000
+#define BQ3500_BCA_BIT_MASK      0b0000100000000000
+#define BQ3500_CAL_MODE_BIT_MASK 0b0001000000000000
+
 class BQ35100 {
   public:
     typedef enum {
@@ -37,14 +43,20 @@ class BQ35100 {
         SECURITY_FULL_ACCESS = 0x01, // Allows writes to all of memory
         SECURITY_UNSEALED = 0x02, // Allows writes to all of memory apart from the security codes area
         SECURITY_SEALED = 0x03 // Normal operating mode, prevents accidental writes
-    } security_mode_t;
+    } bq35100_security_t;
 
     typedef enum {
         ACCUMULATOR_MODE = 0b00,
         SOH_MODE = 0b011, // for LiMnO2
         EOS_MODE = 0b10, // for LiSOCl2
         UNKNOWN_MODE = 0b11
-    } gauge_mode_t;
+    } bq35100_gauge_mode_t;
+    
+    typedef enum {
+        CAL_CURRENT = 0X7A,
+        CAL_VOLTAGE = 0X7C,
+        CAL_TEMPERATURE = 0X7E
+    } bq35100_calibration_t;
 
     /**
      * @brief Constructor
@@ -82,24 +94,31 @@ class BQ35100 {
     bool init(I2C *i2c_obj = nullptr, PinName gauge_enable_pin = NC);
 
     /**
-     * @brief Switch on the battery gauge. Battery gauging must be switched on
+     * @brief Start battery gauge. Battery gauging must be switched on
      * for the battery capacity and percentage readings to be valid. The
      * chip will consume more when battery gauging is switched on.
      *
      * @return true if successful, otherwise false
      */
-    bool enableGauge();
+    bool startGauge(void);
 
     /**
-     * @brief Switch off the battery gauge  If gauging to non-volatile
-     * memory was switched on, the accumulated capacity values
-     * will be stored in non-volatile memory  Please see the warning
+     * @brief Wait until everything finishes up (G_DONE) and asserts GE low
+     *
+     * @return true if successful, otherwise false
+     */
+    bool disableGauge(void);
+
+    /**
+     * @brief Stop battery gauging. It doesn't handle GE pin!
+     * If ACCUMULATOR_MODE is activated, the accumulated capacity values
+     * will be stored in non-volatile memory. Please see the warning
      * in section 5.1.1 of the TI BQ35100 technical reference manual
      * concerning how frequently this should be done.
      *
      * @return true if successful, otherwise false
      */
-    bool disableGauge(void);
+    bool stopGauge(void);
 
     /**
      * @brief Check whether battery gauging is enabled or not
@@ -207,7 +226,7 @@ class BQ35100 {
      * @param gauge_mode the gauging mode
      * @return true if successful, otherwise false
      */
-    bool setGaugeMode(gauge_mode_t gauge_mode);
+    bool setGaugeMode(bq35100_gauge_mode_t gauge_mode);
 
     /**
      * @brief Whether to use internal temperature sensor for calculations
@@ -223,7 +242,7 @@ class BQ35100 {
      * @note _i2c should be locked before this is called
      * @return the security mode
      */
-    security_mode_t getSecurityMode(void);
+    bq35100_security_t getSecurityMode(void);
 
     /**
      * @brief Set the security mode of the chip
@@ -232,7 +251,72 @@ class BQ35100 {
      * @param new_security the security mode to set
      * @return true if successful, otherwise false
      */
-    bool setSecurityMode(security_mode_t new_security);
+    bool setSecurityMode(bq35100_security_t new_security);
+
+    /**
+     * @brief Set measure period in lower power mode for EOS mode
+     * (after GAUGE_STOP)
+     *
+     * @param seconds number of seconds
+     * @return true if successful, otherwise false
+     */
+    bool setEosDataSeconds(uint8_t seconds);
+
+    /**
+     * @brief Get status of the battery
+     *
+     * @param status place to put the battery status reading
+     * @return true if successful, otherwise false
+     */
+    bool getBatteryStatus(uint8_t *status);
+
+    /**
+     * @brief Set events when ALERT pin is asserted
+     *
+     * @param alert binary write enabled events
+     * @return true if successful, otherwise false
+     */
+    bool setBatteryAlert(uint8_t alert);
+
+    /**
+     * @brief Get alert of the battery (to know why ALERT pin was asserted)
+     *
+     * @param status place to put the battery alert reading
+     * @return true if successful, otherwise false
+     */
+    bool getBatteryAlert(uint8_t *alert);
+
+    /**
+     * @brief Set the under temperature
+     *
+     * @param min minimal temperature in 0.1*C
+     * @return true if successful, otherwise false
+     */
+    bool setUnderTemperature(int16_t min);
+
+    /**
+     * @brief Get the raw calibration data
+     * 
+     * @param cmd 
+     * @param address address of the register to read
+     * @return true if successful, otherwise false
+     */
+    bool getRawCalibrationData(bq35100_calibration_t address, uint16_t *result);
+
+    /**
+     * @brief Perform CC offset (no current should be flowing)
+     * 
+     * @return true if successful, otherwise false
+     */
+    bool performCCOffset(void);
+
+    /**
+     * @brief Perform Board offset (no current should be flowing)
+     * 
+     * @return true if successful, otherwise false
+     */
+    bool performBoardOffset(void);
+
 
   protected:
     typedef enum {
@@ -255,6 +339,10 @@ class BQ35100 {
         CMD_MAC_DATA_SUM = 0x60,
         CMD_MAC_DATA_LEN = 0x61,
         CMD_MAC_DATA_CONTROL = 0x62,
+        CMD_CAL_COUNT = 0x79,
+        CMD_CAL_CURRENT = 0X7A,
+        CMD_CAL_VOLTAGE = 0X7C,
+        CMD_CAL_TEMPERATURE = 0X7E
     } bq35100_cmd_t;
 
     typedef enum {
@@ -274,6 +362,8 @@ class BQ35100 {
         CNTL_LT_ENABLE      = 0x002E,
         CNTL_SEAL           = 0x0020,
         CNTL_RESET          = 0x0041,
+        CNTL_EXIT_CAL       = 0x0080,
+        CNTL_ENTER_CAL      = 0x0081,
         CNTL_NEW_BATTERY    = 0xA613
     } bq35100_cntl_t;
 
@@ -282,7 +372,7 @@ class BQ35100 {
     uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
     const uint32_t _seal_codes = BQ35100_DEFAULT_SEAL_CODES;
     const uint8_t _address = BQ35100_I2C_ADDRESS;
-    security_mode_t _security_mode = SECURITY_UNKNOWN;
+    bq35100_security_t _security_mode = SECURITY_UNKNOWN;
     bool _enabled = false;
 
     /**
@@ -316,6 +406,15 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool writeExtendedData(uint16_t address, const char *data, size_t len);
+
+    /**
+     * @brief Enter calibration mode
+     *
+     * @param enable enter(1) or exit(0) calibration mode
+     * @return true if successful, otherwise false
+     */
+    bool enterCalibrationMode(bool enable);
+    bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
 
     bool write(const char *data, size_t len, bool stop = true);
     bool read(char *data, size_t len, bool stop = true);
