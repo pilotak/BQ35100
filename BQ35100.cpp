@@ -441,6 +441,49 @@ END:
     return success;
 }
 
+bool BQ35100::calibrateCurrent(uint16_t current) {
+    char data[2];
+    int16_t cc_offset;
+    int16_t board_offset;
+    uint16_t avg_current;
+
+    // Get CC offset
+    if (!readExtendedData(0x4008, data, sizeof(data))) {
+        return false;
+    }
+
+    cc_offset = (data[1] << 8) | data[0];
+
+    // Get board offset
+    if (!readExtendedData(0x400C, data, sizeof(data))) {
+        return false;
+    }
+
+    board_offset = (data[1] << 8) | data[0];
+
+    // Get avg raw current
+    if (!getRawCalibrationData(CAL_CURRENT, &avg_current)) {
+        return false;
+    }
+
+    float cc_gain = current / (avg_current - (cc_offset + board_offset) / 16);
+
+    if (cc_gain < 2.0 || cc_gain > 10.0) {
+        tr_error("Invalid CC gain result");
+        return false;
+    }
+
+    float cc_delta = cc_gain * 1193046;
+
+    if (cc_delta < 2.98262 || cc_delta > 5.677445) {
+        tr_error("Invalid CC delta result");
+        return false;
+    }
+
+    #error "TODO: SAVE"
+    return true;
+}
+
 bool BQ35100::setEosDataSeconds(uint8_t seconds) {
     char data[1];
     data[0] = seconds;

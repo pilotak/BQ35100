@@ -51,7 +51,7 @@ class BQ35100 {
         EOS_MODE = 0b10, // for LiSOCl2
         UNKNOWN_MODE = 0b11
     } bq35100_gauge_mode_t;
-    
+
     typedef enum {
         CAL_CURRENT = 0X7A,
         CAL_VOLTAGE = 0X7C,
@@ -296,23 +296,25 @@ class BQ35100 {
 
     /**
      * @brief Get the raw calibration data
-     * 
-     * @param cmd 
+     *
+     * @param cmd
      * @param address address of the register to read
      * @return true if successful, otherwise false
      */
     bool getRawCalibrationData(bq35100_calibration_t address, uint16_t *result);
 
+    bool calibrateCurrent(uint16_t current);
+
     /**
      * @brief Perform CC offset (no current should be flowing)
-     * 
+     *
      * @return true if successful, otherwise false
      */
     bool performCCOffset(void);
 
     /**
      * @brief Perform Board offset (no current should be flowing)
-     * 
+     *
      * @return true if successful, otherwise false
      */
     bool performBoardOffset(void);
@@ -422,6 +424,8 @@ class BQ35100 {
     bool getData(bq35100_cmd_t cmd, char *data, size_t len);
     bool sendCntl(bq35100_cntl_t cntl);
     bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
+
+    bool getCCBoardOffset(uint16_t cc, uint16_t board);
 };
 
 #endif // BQ35100_H
