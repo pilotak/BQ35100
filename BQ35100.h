@@ -153,10 +153,10 @@ class BQ35100 {
     /**
      * @brief Whether to use internal temperature sensor for calculations
      *
-     * @param use
+     * @param internal true = internal, false = external (NTC)
      * @return true if successful, otherwise false
      */
-    bool useInternalTemp(bool use);
+    bool useInternalTemp(bool internal);
 
     /**
      * @brief Read the temperature of the BQ35100 chip
@@ -351,8 +351,6 @@ class BQ35100 {
         CMD_MEASURED_Z = 0x22,
         CMD_INTERNAL_TEMPERATURE = 0x28,
         CMD_STATE_OF_HEALTH = 0x2E,
-        // extended
-        CMD_OP_CONFIG = 0x3A,
         CMD_DESIGN_CAPACITY = 0x3C,
         CMD_MAC = 0x3E,
         CMD_MAC_DATA = 0x40,
