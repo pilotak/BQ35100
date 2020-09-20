@@ -116,7 +116,7 @@ bool BQ35100::startGauge(void) {
 
     _enabled = waitforStatus(BQ3500_GA_BIT_MASK, BQ3500_GA_BIT_MASK);
 
-    if (!_enabled) {
+    if (_enabled) {
         tr_info("Gauge enabled");
 
     } else {
