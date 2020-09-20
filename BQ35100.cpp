@@ -1011,7 +1011,7 @@ END:
     return success;
 }
 
-bool BQ35100::readExtendedData(uint16_t address, char *response, size_t len) {
+bool BQ35100::readExtendedData(uint16_t address, char *buffer, size_t len) {
     size_t length_read;
     char data[32 + 2 + 2]; // 32 bytes of data, 2 bytes of address,
 
@@ -1023,7 +1023,7 @@ bool BQ35100::readExtendedData(uint16_t address, char *response, size_t len) {
         return false;
     }
 
-    if (address < 0x4000 || address > 0x43FF || !response) {
+    if (address < 0x4000 || address > 0x43FF || !buffer) {
         tr_error("Invalid input data");
         return false;
     }
@@ -1068,9 +1068,9 @@ bool BQ35100::readExtendedData(uint16_t address, char *response, size_t len) {
         length_read = len;
     }
 
-    memcpy(response, data + 2, length_read);
+    memcpy(buffer, data + 2, length_read);
     success = true;
-    tr_debug("Success data read(%u): %s", length_read, tr_array(reinterpret_cast<uint8_t *>(response), length_read));
+    tr_debug("Success data read(%u): %s", length_read, tr_array(reinterpret_cast<uint8_t *>(buffer), length_read));
 
 END:
 

@@ -395,7 +395,7 @@ class BQ35100 {
      *
      * @param cmd command to be sent
      * @param data a pointer to the data block
-     * @param len size of data
+     * @param len the size of the data to be written
      * @return true if successful, otherwise false
      */
     bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
@@ -443,11 +443,11 @@ class BQ35100 {
      *
      * @note _i2c should be locked before this is called
      * @param address the data flash address to read from
-     * @param response a place to put the read data
-     * @param len the size of the place to put the data block
+     * @param buffer a place to put the read data
+     * @param len size of data to read (make sure it fits into buffer)
      * @return true if successful, otherwise false
      */
-    bool readExtendedData(uint16_t address, char *response, size_t len);
+    bool readExtendedData(uint16_t address, char *buffer, size_t len);
 
     /**
      * @brief Wait for specific status
@@ -476,7 +476,7 @@ class BQ35100 {
      * @brief Main I2C writer function
      *
      * @param data a pointer to the data block
-     * @param len size of data
+     * @param len the size of the data to be written
      * @param stop whether to send stop command
      * @return true if successful, otherwise false
      */
