@@ -100,7 +100,7 @@ bool BQ35100::init(I2C *i2c_obj) {
     // Status
     _enabled = answer & 0b1;
 
-    return _enabled;
+    return true;
 }
 
 bool BQ35100::startGauge(void) {
