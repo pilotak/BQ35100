@@ -57,21 +57,24 @@ class BQ35100 {
     /**
      * @brief Constructor
      *
+     * @param gauge_enable_pin the gauge enable pin (will be set high to enable the chip)
      * @param seal_codes the seal codes for the device (step 1 in the higher word, step 2 the lower word), NOT byte reversed
      * @param address I2C address of the battery gauge chip
      */
-    BQ35100(uint32_t seal_codes = BQ35100_DEFAULT_SEAL_CODES, uint8_t address = BQ35100_I2C_ADDRESS);
+    BQ35100(PinName gauge_enable_pin = NC, uint32_t seal_codes = BQ35100_DEFAULT_SEAL_CODES,
+            uint8_t address = BQ35100_I2C_ADDRESS);
 
     /**
      * @brief Constructor
      *
      * @param sda I2C SDA pin
      * @param scl I2C SCL pin
+     * @param gauge_enable_pin the gauge enable pin (will be set high to enable the chip)
      * @param seal_codes the seal codes for the device (step 1 in the higher word, step 2 the lower word), NOT byte reversed
      * @param frequency frequency of I2C bus
      * @param address I2C address of the battery gauge chip
      */
-    BQ35100(PinName sda, PinName scl, uint32_t seal_codes = BQ35100_DEFAULT_SEAL_CODES,
+    BQ35100(PinName sda, PinName scl, PinName gauge_enable_pin = NC, uint32_t seal_codes = BQ35100_DEFAULT_SEAL_CODES,
             uint8_t address = BQ35100_I2C_ADDRESS, uint32_t frequency = 400000);
 
     /**
@@ -84,10 +87,9 @@ class BQ35100 {
      * @brief Initialise the BQ35100 chip
      *
      * @param i2c_obj pass I2C object if you didn't specify pins in constructor
-     * @param gauge_enable_pin the gauge enable pin (will be set high to enable the chip)
      * @return true if successful, otherwise false
      */
-    bool init(I2C *i2c_obj = nullptr, PinName gauge_enable_pin = NC);
+    bool init(I2C *i2c_obj = nullptr);
 
     /**
      * @brief Start battery gauge. Battery gauging must be switched on
@@ -411,7 +413,7 @@ class BQ35100 {
 
     /**
      * @brief Get data
-     * 
+     *
      * @param cmd command to be read from
      * @param buffer a place to put the read data
      * @param len size of data to read (make sure it fits into buffer)
@@ -421,7 +423,7 @@ class BQ35100 {
 
     /**
      * @brief Send subcommand
-     * 
+     *
      * @param cntl subcommand
      * @return true if successful, otherwise false
      */
@@ -429,9 +431,9 @@ class BQ35100 {
 
     /**
      * @brief Get subcommand data
-     * 
+     *
      * @param cntl subcommand
-     * @param answer 
+     * @param answer
      * @return true if successful, otherwise false
      */
     bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);

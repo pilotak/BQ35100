@@ -16,16 +16,25 @@
 
 #include "BQ35100.h"
 
-BQ35100::BQ35100(uint32_t seal_codes, uint8_t address):
+BQ35100::BQ35100(PinName gauge_enable_pin, uint32_t seal_codes, uint8_t address):
     _seal_codes(seal_codes),
     _address(address) {
+
+    if (gauge_enable_pin != NC) {
+        _gauge_enable_pin = new DigitalOut(gauge_enable_pin, 0);
+    }
 }
 
-BQ35100::BQ35100(PinName sda, PinName scl, uint32_t seal_codes, uint8_t address, uint32_t frequency):
+BQ35100::BQ35100(PinName sda, PinName scl, PinName gauge_enable_pin, uint32_t seal_codes, uint8_t address,
+                 uint32_t frequency):
     _seal_codes(seal_codes),
     _address(address) {
     _i2c = new (_i2c_obj) I2C(sda, scl);
     _i2c->frequency(frequency);
+
+    if (gauge_enable_pin != NC) {
+        _gauge_enable_pin = new DigitalOut(gauge_enable_pin, 0);
+    }
 }
 
 BQ35100::~BQ35100(void) {
@@ -34,7 +43,7 @@ BQ35100::~BQ35100(void) {
     }
 }
 
-bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
+bool BQ35100::init(I2C *i2c_obj) {
     uint16_t answer;
     bool success = false;
 
@@ -44,8 +53,8 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
 
     MBED_ASSERT(_i2c);
 
-    if (gauge_enable_pin != NC) {
-        _gauge_enable_pin = new DigitalOut(gauge_enable_pin, 1);
+    if (_gauge_enable_pin) {
+        _gauge_enable_pin->write(1);
         ThisThread::sleep_for(40ms);
     }
 
