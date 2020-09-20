@@ -186,7 +186,7 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
     // Status
     _enabled = answer & 0b1;
 
-    return true;
+    return _enabled;
 }
 
 bool BQ35100::startGauge(void) {
@@ -223,7 +223,7 @@ bool BQ35100::enterCalibrationMode(bool enable) {
         return false;
     }
 
-    tr_info("Calibration mode %s", enabled ? "enabled", "disabled");
+    tr_info("Calibration mode %s", enable ? "enabled" : "disabled");
 
     return true;
 }
@@ -442,20 +442,20 @@ END:
 }
 
 bool BQ35100::calibrateCurrent(uint16_t current) {
-    char data[2];
+    char data[4];
     int16_t cc_offset;
     int16_t board_offset;
     uint16_t avg_current;
 
     // Get CC offset
-    if (!readExtendedData(0x4008, data, sizeof(data))) {
+    if (!readExtendedData(0x4008, data, 2)) {
         return false;
     }
 
     cc_offset = (data[1] << 8) | data[0];
 
     // Get board offset
-    if (!readExtendedData(0x400C, data, sizeof(data))) {
+    if (!readExtendedData(0x400C, data, 2)) {
         return false;
     }
 
@@ -468,19 +468,32 @@ bool BQ35100::calibrateCurrent(uint16_t current) {
 
     float cc_gain = current / (avg_current - (cc_offset + board_offset) / 16);
 
-    if (cc_gain < 2.0 || cc_gain > 10.0) {
+    if (cc_gain < 2.00E-02 || cc_gain > 10.00E+00) {
         tr_error("Invalid CC gain result");
         return false;
     }
 
     float cc_delta = cc_gain * 1193046;
 
-    if (cc_delta < 2.98262 || cc_delta > 5.677445) {
+    if (cc_delta < 2.98262E+04 || cc_delta > 5.677445E+06) {
         tr_error("Invalid CC delta result");
         return false;
     }
 
-    #error "TODO: SAVE"
+    // save CC gain
+    floatToDF(cc_gain, data);
+
+    if (!writeExtendedData(0x4000, data, sizeof(data))) {
+        return false;
+    }
+
+    // Save CC delta
+    floatToDF(cc_delta, data);
+
+    if (!writeExtendedData(0x4004, data, sizeof(data))) {
+        return false;
+    }
+
     return true;
 }
 
@@ -940,6 +953,59 @@ END:
     return success;
 }
 
+void BQ35100::floatToDF(float val, char *result) {
+    int32_t exp = 0;
+    float mod_val = val;
+    float tmp_val = 0;
+    char data[4];
+
+    if (val < 0.0) {
+        mod_val *= -1;
+    }
+
+    tmp_val = mod_val;
+
+    tmp_val *= (1 + pow(2, -25));
+
+    if (tmp_val < 0.5) {
+        while (tmp_val < 0.5) {
+            tmp_val *= 2;
+            exp--;
+        }
+
+    } else if (tmp_val >= 1.0) {
+        while (tmp_val >= 1.0) {
+            tmp_val /= 2;
+            exp--;
+        }
+    }
+
+    if (exp > 127) {
+        exp = 127;
+
+    } else if (exp < -128) {
+        exp = 128;
+    }
+
+    tmp_val = pow(2, 8 - exp) * val - 128;
+
+    data[2] = (uint8_t)tmp_val;
+    tmp_val = pow(2, 8) * (tmp_val - data[2]);
+    data[1] = (uint8_t)tmp_val;
+    tmp_val = pow(2, 8) * (tmp_val - data[1]);
+    data[0] = (uint8_t)tmp_val;
+
+    if (val < 0.0) {
+        data[2] |= 0x80;
+    }
+
+    data[3] = exp + 128;
+
+    if (result) {
+        memcpy(result, data, 4);
+    }
+}
+
 bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) {
     uint16_t answer;
     char d[32 + 3]; // Max data len + header
@@ -998,7 +1064,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
         goto END;
     }
 
-    if (answer & 0b1000000000000000) {
+    if (answer & BQ3500_FLASHF_BIT_MASK) {
         tr_error("Write failed");
         goto END;
     }

@@ -18,6 +18,7 @@
 #define BQ35100_H
 
 #include "mbed.h"
+#include <math.h>
 using namespace std::chrono;
 
 #include "mbed-trace/mbed_trace.h"
@@ -35,6 +36,7 @@ using namespace std::chrono;
 #define BQ3500_CCA_BIT_MASK      0b0000010000000000
 #define BQ3500_BCA_BIT_MASK      0b0000100000000000
 #define BQ3500_CAL_MODE_BIT_MASK 0b0001000000000000
+#define BQ3500_FLASHF_BIT_MASK   0b1000000000000000
 
 class BQ35100 {
   public:
@@ -51,12 +53,6 @@ class BQ35100 {
         EOS_MODE = 0b10, // for LiSOCl2
         UNKNOWN_MODE = 0b11
     } bq35100_gauge_mode_t;
-
-    typedef enum {
-        CAL_CURRENT = 0X7A,
-        CAL_VOLTAGE = 0X7C,
-        CAL_TEMPERATURE = 0X7E
-    } bq35100_calibration_t;
 
     /**
      * @brief Constructor
@@ -294,15 +290,6 @@ class BQ35100 {
      */
     bool setUnderTemperature(int16_t min);
 
-    /**
-     * @brief Get the raw calibration data
-     *
-     * @param cmd
-     * @param address address of the register to read
-     * @return true if successful, otherwise false
-     */
-    bool getRawCalibrationData(bq35100_calibration_t address, uint16_t *result);
-
     bool calibrateCurrent(uint16_t current);
 
     /**
@@ -369,6 +356,12 @@ class BQ35100 {
         CNTL_NEW_BATTERY    = 0xA613
     } bq35100_cntl_t;
 
+    typedef enum {
+        CAL_CURRENT = 0X7A,
+        CAL_VOLTAGE = 0X7C,
+        CAL_TEMPERATURE = 0X7E
+    } bq35100_calibration_t;
+
     I2C *_i2c;
     DigitalOut *_gauge_enable_pin;
     uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
@@ -425,7 +418,17 @@ class BQ35100 {
     bool sendCntl(bq35100_cntl_t cntl);
     bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
 
-    bool getCCBoardOffset(uint16_t cc, uint16_t board);
+    void floatToDF(float number, char *result);
+
+
+    /**
+     * @brief Get the raw calibration data
+     *
+     * @param cmd
+     * @param address address of the register to read
+     * @return true if successful, otherwise false
+     */
+    bool getRawCalibrationData(bq35100_calibration_t address, uint16_t *result);
 };
 
 #endif // BQ35100_H
