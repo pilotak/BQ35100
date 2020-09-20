@@ -125,6 +125,14 @@ class BQ35100 {
     bool setGaugeMode(bq35100_gauge_mode_t gauge_mode);
 
     /**
+     * @brief Get the chip status
+     *
+     * @param status a place to put the read data
+     * @return true if successful, otherwise false
+     */
+    bool getStatus(uint16_t *status);
+
+    /**
      * @brief Set the designed capacity of the cell
      *
      * @param capacity the capacity in mAh
@@ -163,6 +171,14 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool getInternalTemperature(int16_t *temp);
+
+    /**
+     * @brief Set the under temperature
+     *
+     * @param min minimal temperature in 0.1*C
+     * @return true if successful, otherwise false
+     */
+    bool setUnderTemperature(int16_t min);
 
     /**
      * @brief Read the voltage of the battery
@@ -241,14 +257,6 @@ class BQ35100 {
     bool getBatteryAlert(uint8_t *alert);
 
     /**
-     * @brief Set the under temperature
-     *
-     * @param min minimal temperature in 0.1*C
-     * @return true if successful, otherwise false
-     */
-    bool setUnderTemperature(int16_t min);
-
-    /**
      * @brief Set measure period in lower power mode for EOS mode
      * (after GAUGE_STOP)
      *
@@ -267,14 +275,6 @@ class BQ35100 {
     bool reset(void);
 
     /**
-     * @brief Get the security mode of the chip
-     *
-     * @note _i2c should be locked before this is called
-     * @return the security mode
-     */
-    bq35100_security_t getSecurityMode(void);
-
-    /**
      * @brief Set the security mode of the chip
      *
      * @note _i2c should be locked before this is called
@@ -282,6 +282,14 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool setSecurityMode(bq35100_security_t new_security);
+
+    /**
+     * @brief Get the security mode of the chip
+     *
+     * @note _i2c should be locked before this is called
+     * @return the security mode
+     */
+    bq35100_security_t getSecurityMode(void);
 
     /**
      * @brief Calibrate with known current
@@ -391,25 +399,42 @@ class BQ35100 {
     bq35100_security_t _security_mode = SECURITY_UNKNOWN;
     bool _enabled = false;
 
-    bool write(const char *data, size_t len, bool stop = true);
-
-    bool read(char *data, size_t len, bool stop = true);
-
-    bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
-    bool getData(bq35100_cmd_t cmd, char *data, size_t len);
-    bool sendCntl(bq35100_cntl_t cntl);
-    bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
-
     /**
-     * @brief Read data of a given length and class ID
+     * @brief Send data
      *
-     * @note _i2c should be locked before this is called
-     * @param address the data flash address to read from
-     * @param response a place to put the read data
-     * @param len the size of the place to put the data block
+     * @param cmd command to be sent
+     * @param data a pointer to the data block
+     * @param len size of data
      * @return true if successful, otherwise false
      */
-    bool readExtendedData(uint16_t address, char *response, size_t len);
+    bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
+
+    /**
+     * @brief Get data
+     * 
+     * @param cmd command to be read from
+     * @param buffer a place to put the read data
+     * @param len size of data to read (make sure it fits into buffer)
+     * @return true if successful, otherwise false
+     */
+    bool getData(bq35100_cmd_t cmd, char *buffer, size_t len);
+
+    /**
+     * @brief Send subcommand
+     * 
+     * @param cntl subcommand
+     * @return true if successful, otherwise false
+     */
+    bool sendCntl(bq35100_cntl_t cntl);
+
+    /**
+     * @brief Get subcommand data
+     * 
+     * @param cntl subcommand
+     * @param answer 
+     * @return true if successful, otherwise false
+     */
+    bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
 
     /**
      * @brief Write an extended data block
@@ -423,14 +448,15 @@ class BQ35100 {
     bool writeExtendedData(uint16_t address, const char *data, size_t len);
 
     /**
-     * @brief Compute the checksum of a block of memory in the chip
+     * @brief Read data of a given length and class ID
      *
-     * @param data a pointer to the data block
-     * @parm length the length over which to compute the checksum
-     * @return the checksum value
+     * @note _i2c should be locked before this is called
+     * @param address the data flash address to read from
+     * @param response a place to put the read data
+     * @param len the size of the place to put the data block
+     * @return true if successful, otherwise false
      */
-
-    uint8_t computeChecksum(const char *data, size_t length);
+    bool readExtendedData(uint16_t address, char *response, size_t len);
 
     /**
      * @brief Enter calibration mode
@@ -450,22 +476,24 @@ class BQ35100 {
     bool getRawCalibrationData(bq35100_calibration_t address, int16_t *result);
 
     /**
-     * @brief Get the chip status
-     *
-     * @param status a place to put the read data
-     * @return true if successful, otherwise false
-     */
-    bool getStatus(uint16_t *status);
-
-    /**
      * @brief Wait for specific status
-     * 
-     * @param expected result mask to be matched
+     *
+     * @param expected result bit mask to be matched
      * @param mask bit mask to be matched
      * @param wait how long to wait before repeat
      * @return true if successful, otherwise false
      */
     bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
+
+    /**
+     * @brief Compute the checksum of a block of memory in the chip
+     *
+     * @param data a pointer to the data block
+     * @parm length the length over which to compute the checksum
+     * @return the checksum value
+     */
+
+    uint8_t computeChecksum(const char *data, size_t length);
 
     /**
      * @brief Perform floating point conversion
@@ -474,6 +502,26 @@ class BQ35100 {
      * @param result a place to put the read data (4 bytes long)
      */
     void floatToDF(float val, char *result);
+
+  private:
+    /**
+     * @brief Main I2C writer function
+     *
+     * @param data a pointer to the data block
+     * @param len size of data
+     * @param stop whether to send stop command
+     * @return true if successful, otherwise false
+     */
+    bool write(const char *data, size_t len, bool stop = true);
+
+    /**
+     * @brief Main I2C reader function
+     *
+     * @param buffer a place to put the read data
+     * @param len size of data to read (make sure it fits into buffer)
+     * @return true if successful, otherwise false
+     */
+    bool read(char *buffer, size_t len);
 };
 
 #endif // BQ35100_H
