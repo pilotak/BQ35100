@@ -1081,6 +1081,67 @@ END:
     return success;
 }
 
+bool BQ35100::waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait) {
+    char data[2];
+    data[0] = (char)CMD_CONTROL;
+
+    if (!write(data, 1)) {
+        tr_error("Error writing data");
+        return false;
+    }
+
+    for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
+        if (!read(data, sizeof(data))) {
+            tr_error("Couldn't get device mode");
+            return false;
+        }
+
+        if ((((data[1] << 8) | data[0]) & mask) == expected) {
+            tr_debug("Status match");
+            return true;
+
+        } else {
+            tr_debug("Status not yet in requested state");
+            ThisThread::sleep_for(wait);
+        }
+    }
+
+    return false;
+}
+
+bool BQ35100::write(const char *data, size_t len, bool stop) {
+    tr_debug("Sending data[%u]: %s", len, tr_array(reinterpret_cast<const uint8_t *>(data), len));
+
+    int ack = -1;
+
+    _i2c->lock();
+    ack = _i2c->write(_address, data, len, !stop);
+    _i2c->unlock();
+
+    if (ack != 0) {
+        tr_error("Write failed");
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::read(char *buffer, size_t len) {
+    int ack = -1;
+
+    _i2c->lock();
+    ack = _i2c->read(_address, buffer, len);
+    _i2c->unlock();
+
+    if (ack != 0) {
+        return false;
+    }
+
+    tr_debug("Read data(%u): %s", len, tr_array(reinterpret_cast<uint8_t *>(buffer), len));
+
+    return true;
+}
+
 bool BQ35100::enterCalibrationMode(bool enable) {
     if (!sendCntl(enable ? CNTL_ENTER_CAL : CNTL_EXIT_CAL)) {
         tr_error("Error entering calibration mode");
@@ -1144,34 +1205,6 @@ bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, int16_t *resu
     }
 
     return true;
-}
-
-bool BQ35100::waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait) {
-    char data[2];
-    data[0] = (char)CMD_CONTROL;
-
-    if (!write(data, 1)) {
-        tr_error("Error writing data");
-        return false;
-    }
-
-    for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
-        if (!read(data, sizeof(data))) {
-            tr_error("Couldn't get device mode");
-            return false;
-        }
-
-        if ((((data[1] << 8) | data[0]) & mask) == expected) {
-            tr_debug("Status match");
-            return true;
-
-        } else {
-            tr_debug("Status not yet in requested state");
-            ThisThread::sleep_for(wait);
-        }
-    }
-
-    return false;
 }
 
 uint8_t BQ35100::computeChecksum(const char *data, size_t length) {
@@ -1243,37 +1276,4 @@ void BQ35100::floatToDF(float val, char *result) {
     if (result) {
         memcpy(result, data, 4);
     }
-}
-
-bool BQ35100::write(const char *data, size_t len, bool stop) {
-    tr_debug("Sending data[%u]: %s", len, tr_array(reinterpret_cast<const uint8_t *>(data), len));
-
-    int ack = -1;
-
-    _i2c->lock();
-    ack = _i2c->write(_address, data, len, !stop);
-    _i2c->unlock();
-
-    if (ack != 0) {
-        tr_error("Write failed");
-        return false;
-    }
-
-    return true;
-}
-
-bool BQ35100::read(char *buffer, size_t len) {
-    int ack = -1;
-
-    _i2c->lock();
-    ack = _i2c->read(_address, buffer, len);
-    _i2c->unlock();
-
-    if (ack != 0) {
-        return false;
-    }
-
-    tr_debug("Read data(%u): %s", len, tr_array(reinterpret_cast<uint8_t *>(buffer), len));
-
-    return true;
 }

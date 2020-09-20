@@ -387,17 +387,6 @@ class BQ35100 {
         CNTL_NEW_BATTERY    = 0xA613
     } bq35100_cntl_t;
 
-    typedef enum {
-        CAL_CURRENT = 0X7A,
-        CAL_VOLTAGE = 0X7C,
-        CAL_TEMPERATURE = 0X7E
-    } bq35100_calibration_t;
-
-    I2C *_i2c;
-    DigitalOut *_gauge_enable_pin;
-    uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
-    const uint32_t _seal_codes = BQ35100_DEFAULT_SEAL_CODES;
-    const uint8_t _address = BQ35100_I2C_ADDRESS;
     bq35100_security_t _security_mode = SECURITY_UNKNOWN;
     bool _enabled = false;
 
@@ -461,23 +450,6 @@ class BQ35100 {
     bool readExtendedData(uint16_t address, char *response, size_t len);
 
     /**
-     * @brief Enter calibration mode
-     *
-     * @param enable enter(1) or exit(0) calibration mode
-     * @return true if successful, otherwise false
-     */
-    bool enterCalibrationMode(bool enable);
-
-    /**
-     * @brief Get the raw calibration data
-     *
-     * @param address address of the register to read
-     * @param result a place to put the read data
-     * @return true if successful, otherwise false
-     */
-    bool getRawCalibrationData(bq35100_calibration_t address, int16_t *result);
-
-    /**
      * @brief Wait for specific status
      *
      * @param expected result bit mask to be matched
@@ -487,25 +459,19 @@ class BQ35100 {
      */
     bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
 
-    /**
-     * @brief Compute the checksum of a block of memory in the chip
-     *
-     * @param data a pointer to the data block
-     * @parm length the length over which to compute the checksum
-     * @return the checksum value
-     */
-
-    uint8_t computeChecksum(const char *data, size_t length);
-
-    /**
-     * @brief Perform floating point conversion
-     *
-     * @param val value to be converted
-     * @param result a place to put the read data (4 bytes long)
-     */
-    void floatToDF(float val, char *result);
-
   private:
+    I2C *_i2c;
+    DigitalOut *_gauge_enable_pin;
+    uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
+    const uint32_t _seal_codes = BQ35100_DEFAULT_SEAL_CODES;
+    const uint8_t _address = BQ35100_I2C_ADDRESS;
+
+    typedef enum {
+        CAL_CURRENT = 0X7A,
+        CAL_VOLTAGE = 0X7C,
+        CAL_TEMPERATURE = 0X7E
+    } bq35100_calibration_t;
+
     /**
      * @brief Main I2C writer function
      *
@@ -524,6 +490,41 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool read(char *buffer, size_t len);
+
+    /**
+     * @brief Enter calibration mode
+     *
+     * @param enable enter(1) or exit(0) calibration mode
+     * @return true if successful, otherwise false
+     */
+    bool enterCalibrationMode(bool enable);
+
+    /**
+     * @brief Get the raw calibration data
+     *
+     * @param address address of the register to read
+     * @param result a place to put the read data
+     * @return true if successful, otherwise false
+     */
+    bool getRawCalibrationData(bq35100_calibration_t address, int16_t *result);
+
+    /**
+     * @brief Compute the checksum of a block of memory in the chip
+     *
+     * @param data a pointer to the data block
+     * @parm length the length over which to compute the checksum
+     * @return the checksum value
+     */
+
+    uint8_t computeChecksum(const char *data, size_t length);
+
+    /**
+     * @brief Perform floating point conversion
+     *
+     * @param val value to be converted
+     * @param result a place to put the read data (4 bytes long)
+     */
+    void floatToDF(float val, char *result);
 };
 
 #endif // BQ35100_H
