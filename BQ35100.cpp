@@ -105,12 +105,7 @@ bool BQ35100::getCntl(bq35100_cntl_t cntl, uint16_t *answer) {
         return false;
     }
 
-    if (cntl == CNTL_CONTROL_STATUS) {
-        success = getData(CMD_CONTROL, data, sizeof(data));
-
-    } else {
-        success = getData(CMD_MAC_DATA, data, sizeof(data));
-    }
+    success = getData(CMD_MAC_DATA, data, sizeof(data));
 
     if (success && answer) {
         *answer = (((uint16_t) data[1]) << 8) + data[0];
@@ -158,8 +153,7 @@ bool BQ35100::init(I2C *i2c_obj, PinName gauge_enable_pin) {
     }
 
     // Get security mode & status
-    if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
-        tr_error("Couldn't get security mode");
+    if (!getStatus(&answer)) {
         return false;
     }
 
@@ -228,6 +222,27 @@ bool BQ35100::enterCalibrationMode(bool enable) {
     return true;
 }
 
+bool BQ35100::getStatus(uint16_t *status) {
+    char data[2];
+    data[0] = (char)CMD_CONTROL;
+
+    if (!write(data, 1)) {
+        tr_error("Error writing data");
+        return false;
+    }
+
+    if (!read(data, sizeof(data))) {
+        tr_error("Couldn't get device mode");
+        return false;
+    }
+
+    if (status) {
+        *status = (data[1] << 8) | data[0];
+    }
+
+    return true;
+}
+
 bool BQ35100::waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait) {
     char data[2];
     data[0] = (char)CMD_CONTROL;
@@ -288,7 +303,7 @@ bool BQ35100::performCCOffset(void) {
 
     tr_info("CC offset saved");
 
-    if (!enterCalibrationMode(true)) {
+    if (!enterCalibrationMode(false)) {
         return false;
     }
 
@@ -323,14 +338,14 @@ bool BQ35100::performBoardOffset(void) {
 
     tr_info("Board offset OK");
 
-    if (!enterCalibrationMode(true)) {
+    if (!enterCalibrationMode(false)) {
         return false;
     }
 
     return true;
 }
 
-bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, uint16_t *result) {
+bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, int16_t *result) {
     char data[2];
     uint8_t adc_counter_prev = 0;
     uint8_t counter = 0;
@@ -368,7 +383,7 @@ bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, uint16_t *res
     }
 
     if (result) {
-        *result = (uint16_t)(avg / 4);
+        *result = (int16_t)(avg / 4);
     }
 
 
@@ -402,14 +417,12 @@ bool BQ35100::stopGauge(void) {
     return _enabled;
 }
 
-
 bool BQ35100::disableGauge(void) {
     bool success = false;
     uint16_t answer;
 
     for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
-        if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
-            tr_error("Couldn't get device mode");
+        if (!getStatus(&answer)) {
             return false;
         }
 
@@ -441,11 +454,82 @@ END:
     return success;
 }
 
-bool BQ35100::calibrateCurrent(uint16_t current) {
+bool BQ35100::calibrateVoltage(int16_t voltage) {
+    char data[1];
+    int16_t avg_voltage;
+    int32_t offset;
+
+    // Get avg raw voltage
+    if (!getRawCalibrationData(CAL_VOLTAGE, &avg_voltage)) {
+        return false;
+    }
+
+    offset = voltage - avg_voltage;
+
+    tr_info("Voltage calibration difference: %i", offset);
+
+    if (offset < 128 || offset > 127) {
+        tr_error("Invalid voltage offset");
+        return false;
+    }
+
+    data[0] = (int8_t)offset;
+
+    // Save offset
+    if (!writeExtendedData(0x400F, data, sizeof(data))) {
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::calibrateTemperature(int16_t temp) {
+    char data[1];
+    int16_t avg_temp;
+    bool external;
+    int32_t offset;
+
+    // Get the Operation Config A
+    if (!readExtendedData(0x41B1, data, sizeof(data))) {
+        return false;
+    }
+
+    // Determine which temperature source is selected
+    external = (data[0] & 0b10000000);
+
+    tr_debug("Calibrating %s temperature", external ? "external" : "internal");
+
+    // Get avg raw temperature
+    if (!getRawCalibrationData(CAL_TEMPERATURE, &avg_temp)) {
+        return false;
+    }
+
+    offset = temp - avg_temp;
+
+    tr_info("Temperature calibration difference: %i", offset);
+
+    if (offset < 128 || offset > 127) {
+        tr_error("Invalid temperature offset");
+        return false;
+    }
+
+    data[0] = (int8_t)offset;
+
+    // Save offset
+    if (!writeExtendedData(internal ? 0x400D : 0x400E, data, sizeof(data))) {
+        return false;
+    }
+
+    return true;
+}
+
+bool BQ35100::calibrateCurrent(int16_t current) {
     char data[4];
     int16_t cc_offset;
     int16_t board_offset;
-    uint16_t avg_current;
+    int16_t avg_current;
+
+    tr_info("Performing current calibration");
 
     // Get CC offset
     if (!readExtendedData(0x4008, data, 2)) {
@@ -480,7 +564,7 @@ bool BQ35100::calibrateCurrent(uint16_t current) {
         return false;
     }
 
-    // save CC gain
+    // Save CC gain
     floatToDF(cc_gain, data);
 
     if (!writeExtendedData(0x4000, data, sizeof(data))) {
@@ -557,10 +641,6 @@ bool BQ35100::getBatteryAlert(uint8_t *alert) {
     return true;
 }
 
-bool BQ35100::isGaugeEnabled(void) {
-    return _enabled;
-}
-
 bool BQ35100::setDesignCapacity(uint16_t capacity) {
     char data[2];
 
@@ -612,7 +692,6 @@ bool BQ35100::getTemperature(int16_t *temp) {
 
     return true;
 }
-
 
 bool BQ35100::getInternalTemperature(int16_t *temp) {
     char data[2];
@@ -767,7 +846,6 @@ bool BQ35100::newBattery(uint16_t capacity) {
 }
 
 bool BQ35100::reset(void) {
-    bool success = false;
     bq35100_security_t prev_security_mode = _security_mode;
 
     if (_security_mode == SECURITY_UNKNOWN) {
@@ -779,15 +857,13 @@ bool BQ35100::reset(void) {
         return false;
     }
 
-    if (sendCntl(CNTL_RESET)) {
-        success = true;
+    if (!sendCntl(CNTL_RESET)) {
+        return false;
     }
 
-    if (prev_security_mode != _security_mode) { // in case we changed the mode
-        success = setSecurityMode(prev_security_mode);
-    }
+    _security_mode == SECURITY_UNKNOWN;
 
-    return success;
+    return true;
 }
 
 bool BQ35100::setGaugeMode(bq35100_gauge_mode_t gauge_mode) {
@@ -1059,8 +1135,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
         goto END;
     }
 
-    if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
-        tr_error("Get status failed");
+    if (!getStatus(&answer)) {
         goto END;
     }
 
@@ -1084,8 +1159,7 @@ END:
 BQ35100::bq35100_security_t BQ35100::getSecurityMode(void) {
     uint16_t answer;
 
-    if (!getCntl(CNTL_CONTROL_STATUS, &answer)) {
-        tr_error("Couldn't get security mode");
+    if (!getStatus(&answer)) {
         return SECURITY_UNKNOWN;
     }
 

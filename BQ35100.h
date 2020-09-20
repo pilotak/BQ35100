@@ -99,13 +99,6 @@ class BQ35100 {
     bool startGauge(void);
 
     /**
-     * @brief Wait until everything finishes up (G_DONE) and asserts GE low
-     *
-     * @return true if successful, otherwise false
-     */
-    bool disableGauge(void);
-
-    /**
      * @brief Stop battery gauging. It doesn't handle GE pin!
      * If ACCUMULATOR_MODE is activated, the accumulated capacity values
      * will be stored in non-volatile memory. Please see the warning
@@ -117,11 +110,19 @@ class BQ35100 {
     bool stopGauge(void);
 
     /**
-     * @brief Check whether battery gauging is enabled or not
+     * @brief Wait until everything finishes up (G_DONE) and asserts GE low
      *
-     * @return true if battery gauging is enabled, otherwise false
+     * @return true if successful, otherwise false
      */
-    bool isGaugeEnabled(void);
+    bool disableGauge(void);
+
+    /**
+     * @brief Set the Gauge Mode object
+     *
+     * @param gauge_mode the gauging mode
+     * @return true if successful, otherwise false
+     */
+    bool setGaugeMode(bq35100_gauge_mode_t gauge_mode);
 
     /**
      * @brief Set the designed capacity of the cell
@@ -138,6 +139,14 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool getDesignCapacity(uint16_t *capacity);
+
+    /**
+     * @brief Whether to use internal temperature sensor for calculations
+     *
+     * @param use
+     * @return true if successful, otherwise false
+     */
+    bool useInternalTemp(bool use);
 
     /**
      * @brief Read the temperature of the BQ35100 chip
@@ -208,6 +217,47 @@ class BQ35100 {
     bool newBattery(uint16_t capacity);
 
     /**
+     * @brief Get status of the battery
+     *
+     * @param status place to put the battery status reading
+     * @return true if successful, otherwise false
+     */
+    bool getBatteryStatus(uint8_t *status);
+
+    /**
+     * @brief Set events when ALERT pin is asserted
+     *
+     * @param alert binary write enabled events
+     * @return true if successful, otherwise false
+     */
+    bool setBatteryAlert(uint8_t alert);
+
+    /**
+     * @brief Get alert of the battery (to know why ALERT pin was asserted)
+     *
+     * @param alert place to put the battery alert reading
+     * @return true if successful, otherwise false
+     */
+    bool getBatteryAlert(uint8_t *alert);
+
+    /**
+     * @brief Set the under temperature
+     *
+     * @param min minimal temperature in 0.1*C
+     * @return true if successful, otherwise false
+     */
+    bool setUnderTemperature(int16_t min);
+
+    /**
+     * @brief Set measure period in lower power mode for EOS mode
+     * (after GAUGE_STOP)
+     *
+     * @param seconds number of seconds
+     * @return true if successful, otherwise false
+     */
+    bool setEosDataSeconds(uint8_t seconds);
+
+    /**
      * @brief Advanced function to perform a hard reset of the chip, reinitialising RAM
      *
      * data to defaults from ROM
@@ -215,22 +265,6 @@ class BQ35100 {
      * @return true if successful, otherwise false
      */
     bool reset(void);
-
-    /**
-     * @brief Set the Gauge Mode object
-     *
-     * @param gauge_mode the gauging mode
-     * @return true if successful, otherwise false
-     */
-    bool setGaugeMode(bq35100_gauge_mode_t gauge_mode);
-
-    /**
-     * @brief Whether to use internal temperature sensor for calculations
-     *
-     * @param use
-     * @return true if successful, otherwise false
-     */
-    bool useInternalTemp(bool use);
 
     /**
      * @brief Get the security mode of the chip
@@ -250,51 +284,18 @@ class BQ35100 {
     bool setSecurityMode(bq35100_security_t new_security);
 
     /**
-     * @brief Set measure period in lower power mode for EOS mode
-     * (after GAUGE_STOP)
+     * @brief Calibrate with known current
      *
-     * @param seconds number of seconds
+     * @note UNSEAL before calibration
+     * @param voltage known voltage in (mV)
      * @return true if successful, otherwise false
      */
-    bool setEosDataSeconds(uint8_t seconds);
-
-    /**
-     * @brief Get status of the battery
-     *
-     * @param status place to put the battery status reading
-     * @return true if successful, otherwise false
-     */
-    bool getBatteryStatus(uint8_t *status);
-
-    /**
-     * @brief Set events when ALERT pin is asserted
-     *
-     * @param alert binary write enabled events
-     * @return true if successful, otherwise false
-     */
-    bool setBatteryAlert(uint8_t alert);
-
-    /**
-     * @brief Get alert of the battery (to know why ALERT pin was asserted)
-     *
-     * @param status place to put the battery alert reading
-     * @return true if successful, otherwise false
-     */
-    bool getBatteryAlert(uint8_t *alert);
-
-    /**
-     * @brief Set the under temperature
-     *
-     * @param min minimal temperature in 0.1*C
-     * @return true if successful, otherwise false
-     */
-    bool setUnderTemperature(int16_t min);
-
-    bool calibrateCurrent(uint16_t current);
+    bool calibrateVoltage(int16_t voltage);
 
     /**
      * @brief Perform CC offset (no current should be flowing)
      *
+     * @note UNSEAL before calibration
      * @return true if successful, otherwise false
      */
     bool performCCOffset(void);
@@ -302,10 +303,30 @@ class BQ35100 {
     /**
      * @brief Perform Board offset (no current should be flowing)
      *
+     * @note UNSEAL before calibration
      * @return true if successful, otherwise false
      */
     bool performBoardOffset(void);
 
+    /**
+     * @brief Calibrate with known current flowing
+     *
+     * @note UNSEAL before calibration
+     * @param current known constant current (mA)
+     * @return true if successful, otherwise false
+     */
+    bool calibrateCurrent(int16_t current);
+
+    /**
+     * @brief Calibrate internal/external temperature.
+     * To determine which tempearture source is selected calling
+     * useInternalTemp(true/false) is recommended prior to this.
+     *
+     * @note UNSEAL before calibration
+     * @param temp temperature in (0.1°C)
+     * @return true if successful, otherwise false
+     */
+    bool calibrateTemperature(int16_t temp);
 
   protected:
     typedef enum {
@@ -335,7 +356,7 @@ class BQ35100 {
     } bq35100_cmd_t;
 
     typedef enum {
-        CNTL_CONTROL_STATUS = 0x0000,
+        // CNTL_CONTROL_STATUS = 0x0000, // call getStatus() instead
         CNTL_DEVICE_TYPE    = 0x0001,
         CNTL_FW_VERSION     = 0x0002,
         CNTL_HW_VERSION     = 0x0003,
@@ -370,15 +391,14 @@ class BQ35100 {
     bq35100_security_t _security_mode = SECURITY_UNKNOWN;
     bool _enabled = false;
 
-    /**
-     * @brief Compute the checksum of a block of memory in the chip
-     *
-     * @param data a pointer to the data block
-     * @parm length the length over which to compute the checksum
-     * @return the checksum value
-     */
+    bool write(const char *data, size_t len, bool stop = true);
 
-    uint8_t computeChecksum(const char *data, size_t length);
+    bool read(char *data, size_t len, bool stop = true);
+
+    bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
+    bool getData(bq35100_cmd_t cmd, char *data, size_t len);
+    bool sendCntl(bq35100_cntl_t cntl);
+    bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
 
     /**
      * @brief Read data of a given length and class ID
@@ -403,32 +423,57 @@ class BQ35100 {
     bool writeExtendedData(uint16_t address, const char *data, size_t len);
 
     /**
+     * @brief Compute the checksum of a block of memory in the chip
+     *
+     * @param data a pointer to the data block
+     * @parm length the length over which to compute the checksum
+     * @return the checksum value
+     */
+
+    uint8_t computeChecksum(const char *data, size_t length);
+
+    /**
      * @brief Enter calibration mode
      *
      * @param enable enter(1) or exit(0) calibration mode
      * @return true if successful, otherwise false
      */
     bool enterCalibrationMode(bool enable);
-    bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
-
-    bool write(const char *data, size_t len, bool stop = true);
-    bool read(char *data, size_t len, bool stop = true);
-    bool sendData(bq35100_cmd_t cmd, const char *data, size_t len);
-    bool getData(bq35100_cmd_t cmd, char *data, size_t len);
-    bool sendCntl(bq35100_cntl_t cntl);
-    bool getCntl(bq35100_cntl_t cntl, uint16_t *answer);
-
-    void floatToDF(float number, char *result);
-
 
     /**
      * @brief Get the raw calibration data
      *
-     * @param cmd
      * @param address address of the register to read
+     * @param result a place to put the read data
      * @return true if successful, otherwise false
      */
-    bool getRawCalibrationData(bq35100_calibration_t address, uint16_t *result);
+    bool getRawCalibrationData(bq35100_calibration_t address, int16_t *result);
+
+    /**
+     * @brief Get the chip status
+     *
+     * @param status a place to put the read data
+     * @return true if successful, otherwise false
+     */
+    bool getStatus(uint16_t *status);
+
+    /**
+     * @brief Wait for specific status
+     * 
+     * @param expected result mask to be matched
+     * @param mask bit mask to be matched
+     * @param wait how long to wait before repeat
+     * @return true if successful, otherwise false
+     */
+    bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
+
+    /**
+     * @brief Perform floating point conversion
+     *
+     * @param val value to be converted
+     * @param result a place to put the read data (4 bytes long)
+     */
+    void floatToDF(float val, char *result);
 };
 
 #endif // BQ35100_H
