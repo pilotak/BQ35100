@@ -129,9 +129,9 @@ class BQ35100 {
 
     /**
      * @brief Enable lifetime data gathering feature
-     * 
+     *
      * @note UNSEAL before use
-     * @param enable 
+     * @param enable
      * @return true if successful, otherwise false
      */
     bool enableLifetime(bool enable);
@@ -193,7 +193,7 @@ class BQ35100 {
 
     /**
      * @brief Set the under temperature
-     * 
+     *
      * @param clear temperature when the under tempearture is cleared in 0.1*C
      * @return true if successful, otherwise false
      */
@@ -263,7 +263,7 @@ class BQ35100 {
      * @param capacity the capacity of the battery (mAh), if zero use the previous set
      * @return true if successful, otherwise false
      */
-    bool newBattery(uint16_t capacity);
+    bool newBattery(uint16_t capacity = 0);
 
     /**
      * @brief Get status of the battery

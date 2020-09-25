@@ -548,7 +548,7 @@ bool BQ35100::getRemainingPercentage(uint8_t *battery_percentage) {
     return true;
 }
 
-bool BQ35100::newBattery(uint16_t capacity = 0) {
+bool BQ35100::newBattery(uint16_t capacity) {
     if (capacity != 0 && !setDesignCapacity(capacity)) {
         return false;
     }
