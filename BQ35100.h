@@ -196,7 +196,7 @@ class BQ35100 {
      * @param current place to put the current reading
      * @return true if successful, otherwise false
      */
-    bool getCurrent(uint16_t *current);
+    bool getCurrent(int16_t *current);
 
     /**
      * @brief Read the battery capacity used in uAh (NOT mAh)

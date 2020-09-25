@@ -371,7 +371,7 @@ bool BQ35100::getVoltage(uint16_t *voltage) {
     return true;
 }
 
-bool BQ35100::getCurrent(uint16_t *current) {
+bool BQ35100::getCurrent(int16_t *current) {
     char data[2];
 
     if (!getData(CMD_CURRENT, data, 2)) {
@@ -383,7 +383,7 @@ bool BQ35100::getCurrent(uint16_t *current) {
         *current = (data[1] << 8) | data[0];
     }
 
-    tr_info("Current: %umA", (data[1] << 8) | data[0]);
+    tr_info("Current: %imA", (data[1] << 8) | data[0]);
 
     return true;
 }
@@ -586,6 +586,7 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
 
         switch (new_security) {
             case SECURITY_SEALED:
+                tr_debug("Setting security to SEALED");
                 sendCntl(CNTL_SEAL);
                 break;
 
@@ -602,15 +603,18 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
 
                 uint32_t full_access_codes = (data[0] << 24) + (data[1] << 16) + (data[2] << 8) + data[3];
 
+                tr_debug("Setting security to FULL ACCESS");
+
                 // Send the full access code with endianness conversion
                 // in TWO writes
                 data[2] = (full_access_codes >> 24) & 0xFF;
                 data[1] = (full_access_codes >> 16) & 0xFF;
-                write(data, 3);
 
-                data[2] = (full_access_codes >> 8) & 0xFF;
-                data[1] = full_access_codes & 0xFF;
-                write(data, 3);
+                if (write(data, 3)) {
+                    data[2] = (full_access_codes >> 8) & 0xFF;
+                    data[1] = full_access_codes & 0xFF;
+                    write(data, 3);
+                }
             }
             break;
 
@@ -620,13 +624,17 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
                     return false;
                 }
 
+                printf("Setting security to UNSEALED\n");
+
                 data[2] = (_seal_codes >> 24) & 0xFF;
                 data[1] = (_seal_codes >> 16) & 0xFF;
-                write(data, 3);
 
-                data[2] = (_seal_codes >> 8) & 0xFF;
-                data[1] = _seal_codes & 0xFF;
-                write(data, 3);
+                if (write(data, 3)) {
+                    data[2] = (_seal_codes >> 8) & 0xFF;
+                    data[1] = _seal_codes & 0xFF;
+
+                    write(data, 3);
+                }
             }
             break;
 
@@ -644,7 +652,7 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
             tr_info("Security mode set");
 
         } else {
-            ThisThread::sleep_for(1s);
+            ThisThread::sleep_for(10ms);
             tr_error("Security mode set failed (wanted 0x%02X, got 0x%02X), will retry", new_security, _security_mode);
         }
     }
@@ -1122,6 +1130,8 @@ bool BQ35100::write(const char *data, size_t len, bool stop) {
         tr_error("Write failed");
         return false;
     }
+
+    ThisThread::sleep_for(5ms); // datasheet says 10ms but 5ms is ok
 
     return true;
 }
