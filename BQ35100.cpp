@@ -645,6 +645,7 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
                 break;
         }
 
+        ThisThread::sleep_for(40ms); // always wait after writing codes
         _security_mode = getSecurityMode();
 
         if (_security_mode == new_security) {
@@ -1131,7 +1132,7 @@ bool BQ35100::write(const char *data, size_t len, bool stop) {
         return false;
     }
 
-    ThisThread::sleep_for(5ms); // datasheet says 10ms but 5ms is ok
+    ThisThread::sleep_for(1ms); // wait after each write
 
     return true;
 }
