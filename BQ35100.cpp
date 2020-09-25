@@ -55,7 +55,7 @@ bool BQ35100::init(I2C *i2c_obj) {
 
     if (_gauge_enable_pin) {
         _gauge_enable_pin->write(1);
-        ThisThread::sleep_for(40ms);
+        ThisThread::sleep_for(100ms);
     }
 
     // Get device type
@@ -63,7 +63,7 @@ bool BQ35100::init(I2C *i2c_obj) {
         success = getCntl(CNTL_HW_VERSION, &answer);
 
         if (!success) {
-            ThisThread::sleep_for(40ms);
+            ThisThread::sleep_for(100ms);
         }
     }
 
@@ -95,6 +95,16 @@ bool BQ35100::init(I2C *i2c_obj) {
         default:
             tr_error("Invalid device mode");
             return false;
+    }
+
+    // Wait for initialization
+    if (!(answer & BQ3500_INITCOMP_BIT_MASK)) {
+        tr_debug("Device initialization not complete");
+
+        if (!waitforStatus(BQ3500_INITCOMP_BIT_MASK, BQ3500_INITCOMP_BIT_MASK)) {
+            tr_error("Device initialization failed");
+            return false;
+        }
     }
 
     // Status
@@ -137,47 +147,33 @@ bool BQ35100::stopGauge(void) {
         return false;
     }
 
-    _enabled = !waitforStatus(0, BQ3500_GA_BIT_MASK);
+    // Stopping takes a lot of time
+    if (waitforStatus(0, BQ3500_GA_BIT_MASK, 500ms)) {
+        tr_info("Gauge stopped");
+        _enabled = false;
 
-    if (!_enabled) {
+    } else {
+        tr_error("Gauge not stopped");
+    }
+
+    return !_enabled;
+}
+
+bool BQ35100::disableGauge(void) {
+    bool success = false;
+
+    if (!stopGauge()) {
+        return false;
+    }
+
+    success = waitforStatus(BQ3500_G_DONE_BIT_MASK, BQ3500_G_DONE_BIT_MASK);
+
+    if (success) {
         tr_info("Gauge disabled");
 
     } else {
         tr_error("Gauge not disabled");
     }
-
-    return _enabled;
-}
-
-bool BQ35100::disableGauge(void) {
-    bool success = false;
-    uint16_t answer;
-
-    for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
-        if (!getStatus(&answer)) {
-            return false;
-        }
-
-        if (answer & BQ3500_GA_BIT_MASK) {
-            tr_warning("Gauge is switched on, turning off");
-
-            if (!stopGauge()) {
-                goto END;
-            }
-        }
-
-        if (answer & BQ3500_G_DONE_BIT_MASK) {
-            tr_info("Gauge can be powered down");
-            success = true;
-            break;
-
-        } else {
-            tr_debug("Can't be powered down yet");
-            ThisThread::sleep_for(10ms);
-        }
-    }
-
-END:
 
     if (_gauge_enable_pin) {
         _gauge_enable_pin->write(0);
@@ -204,6 +200,8 @@ bool BQ35100::setGaugeMode(bq35100_gauge_mode_t gauge_mode) {
         op[0] &= ~0b11;
         op[0] |= (char)gauge_mode;
 
+        ThisThread::sleep_for(40ms);
+
         if (!writeExtendedData(0x41B1, op, sizeof(op))) {
             return false;
         }
@@ -213,6 +211,39 @@ bool BQ35100::setGaugeMode(bq35100_gauge_mode_t gauge_mode) {
     } else {
         tr_warning("Gauge mode already set");
     }
+
+    return true;
+}
+
+bool BQ35100::enableLifetime(bool enable) {
+    char op[1];
+
+    // Get the Operation Config A
+    if (!readExtendedData(0x41B1, op, sizeof(op))) {
+        return false;
+    }
+
+    bool state = op[0] & 0b10000;
+
+    if (state == enable) {
+        tr_warning("LF already set");
+        return true;
+    }
+
+    // Set the LF_EN
+    op[0] &= ~0b10000;
+
+    if (enable) {
+        op[0] |= 0b10000;
+    }
+
+    ThisThread::sleep_for(40ms);
+
+    if (!writeExtendedData(0x41B1, op, sizeof(op))) {
+        return false;
+    }
+
+    tr_info("LF set");
 
     return true;
 }
@@ -286,6 +317,8 @@ bool BQ35100::useInternalTemp(bool internal) {
             op[0] |= 0b10000000;
         }
 
+        ThisThread::sleep_for(40ms);
+
         if (!writeExtendedData(0x41B1, op, sizeof(op))) {
             return false;
         }
@@ -339,17 +372,47 @@ bool BQ35100::getInternalTemperature(int16_t *temp) {
     return true;
 }
 
-bool BQ35100::setUnderTemperature(int16_t min) {
+bool BQ35100::setUnderTemperatureThreshold(int16_t min) {
     char data[2];
     data[0] = min & UCHAR_MAX;
     data[1] = min >> 8;
 
-    if (!writeExtendedData(0x41E3, data, sizeof(data))) {
+    if (!writeExtendedData(0x41E0, data, sizeof(data))) {
         tr_error("Sending under temperature temp failed");
         return false;
     }
 
     tr_info("Under temperature set to: %i", min);
+
+    return true;
+}
+
+bool BQ35100::setUnderTemperatureClear(int16_t clear) {
+    char data[2];
+    data[0] = clear & UCHAR_MAX;
+    data[1] = clear >> 8;
+
+    if (!writeExtendedData(0x41E3, data, sizeof(data))) {
+        tr_error("Sending clear under temperature temp failed");
+        return false;
+    }
+
+    tr_info("Clear under temperature set to: %i", clear);
+
+    return true;
+}
+
+bool BQ35100::setLowBatteryThreshold(uint16_t voltage){
+    char data[2];
+    data[0] = voltage & UCHAR_MAX;
+    data[1] = voltage >> 8;
+
+    if (!writeExtendedData(0x41DB, data, sizeof(data))) {
+        tr_error("Sending low battery threshold failed");
+        return false;
+    }
+
+    tr_info("Low battery threshold set to: %u", voltage);
 
     return true;
 }
@@ -374,6 +437,11 @@ bool BQ35100::getVoltage(uint16_t *voltage) {
 bool BQ35100::getCurrent(int16_t *current) {
     char data[2];
 
+    if (!_enabled) {
+        tr_warning("Gauge not enabled");
+        return false;
+    }
+
     if (!getData(CMD_CURRENT, data, 2)) {
         tr_error("Could not current reading");
         return false;
@@ -383,7 +451,7 @@ bool BQ35100::getCurrent(int16_t *current) {
         *current = (data[1] << 8) | data[0];
     }
 
-    tr_info("Current: %imA", (data[1] << 8) | data[0]);
+    tr_info("Current: %imA", (int16_t)((data[1] << 8) | data[0]));
 
     return true;
 }
@@ -400,7 +468,7 @@ bool BQ35100::getUsedCapacity(uint32_t *capacity_used) {
         *capacity_used = (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | data[0];
     }
 
-    tr_info("Battery capacity used %i uAh", (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | data[0]);
+    tr_info("Battery capacity used %u uAh", (data[3] << 24) | (data[2] << 16) | (data[1] << 8) | data[0]);
     return true;
 }
 
@@ -418,9 +486,13 @@ bool BQ35100::getRemainingCapacity(uint16_t *remaining_capacity) {
         return false;
     }
 
-    // Correct units
-    used_capacity += 500; // round up
-    used_capacity /= 1000; // uAh to mAh
+    if (used_capacity != 0) {
+        used_capacity = ULONG_MAX - used_capacity + 1; // used capacity is counted from zero - used uA
+
+        // Correct units
+        used_capacity += 500; // round up
+        used_capacity /= 1000; // uAh to mAh
+    }
 
     // Limit the result
     if (used_capacity > design_capacity) {
@@ -432,7 +504,7 @@ bool BQ35100::getRemainingCapacity(uint16_t *remaining_capacity) {
         *remaining_capacity = design_capacity - used_capacity;
     }
 
-    tr_info("Battery capacity remaining %lu uAh (from a designed capacity of %u mAh)",
+    tr_info("Battery capacity remaining %lu mAh (from a designed capacity of %u mAh)",
             design_capacity - used_capacity, design_capacity);
 
     return true;
@@ -452,9 +524,14 @@ bool BQ35100::getRemainingPercentage(uint8_t *battery_percentage) {
         return false;
     }
 
-    // Correct units
-    used_capacity += 500; // round up
-    used_capacity /= 1000; // uAh to mAh
+    if (used_capacity != 0) {
+        // used capacity is counted from zero - used uAh
+        used_capacity = ULONG_MAX - used_capacity + 1;
+
+        // Correct units
+        used_capacity += 500; // round up
+        used_capacity /= 1000; // uAh to mAh
+    }
 
     // Limit the result
     if (used_capacity > design_capacity) {
@@ -471,7 +548,7 @@ bool BQ35100::getRemainingPercentage(uint8_t *battery_percentage) {
     return true;
 }
 
-bool BQ35100::newBattery(uint16_t capacity) {
+bool BQ35100::newBattery(uint16_t capacity = 0) {
     if (capacity != 0 && !setDesignCapacity(capacity)) {
         return false;
     }
@@ -653,8 +730,8 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
             tr_info("Security mode set");
 
         } else {
-            ThisThread::sleep_for(10ms);
             tr_error("Security mode set failed (wanted 0x%02X, got 0x%02X), will retry", new_security, _security_mode);
+            ThisThread::sleep_for(40ms);
         }
     }
 
@@ -711,6 +788,8 @@ bool BQ35100::calibrateVoltage(int16_t voltage) {
     data[0] = (int8_t)offset;
 
     // Save offset
+    ThisThread::sleep_for(40ms);
+
     if (!writeExtendedData(0x400F, data, sizeof(data))) {
         return false;
     }
@@ -825,6 +904,8 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
     data[0] = (int8_t)offset;
 
     // Save offset
+    ThisThread::sleep_for(40ms);
+
     if (!writeExtendedData(external ? 0x400E : 0x400D, data, sizeof(data))) {
         return false;
     }
@@ -875,6 +956,7 @@ bool BQ35100::calibrateCurrent(int16_t current) {
 
     // Save CC gain
     floatToDF(cc_gain, data);
+    ThisThread::sleep_for(40ms);
 
     if (!writeExtendedData(0x4000, data, sizeof(data))) {
         return false;
@@ -882,6 +964,7 @@ bool BQ35100::calibrateCurrent(int16_t current) {
 
     // Save CC delta
     floatToDF(cc_delta, data);
+    ThisThread::sleep_for(40ms);
 
     if (!writeExtendedData(0x4004, data, sizeof(data))) {
         return false;
@@ -1091,26 +1174,19 @@ END:
 }
 
 bool BQ35100::waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait) {
-    char data[2];
-    data[0] = (char)CMD_CONTROL;
-
-    if (!write(data, 1)) {
-        tr_error("Error writing data");
-        return false;
-    }
+    uint16_t answer;
 
     for (auto i = 0; i < MBED_CONF_BQ35100_RETRY; i++) {
-        if (!read(data, sizeof(data))) {
-            tr_error("Couldn't get device mode");
+        if (!getStatus(&answer)) {
             return false;
         }
 
-        if ((((data[1] << 8) | data[0]) & mask) == expected) {
-            tr_debug("Status match");
+        if ((answer & mask) == expected) {
+            tr_info("Status match");
             return true;
 
         } else {
-            tr_debug("Status not yet in requested state");
+            tr_error("Status not yet in requested state read: %04X expected: %04X", answer, expected);
             ThisThread::sleep_for(wait);
         }
     }
@@ -1132,7 +1208,7 @@ bool BQ35100::write(const char *data, size_t len, bool stop) {
         return false;
     }
 
-    ThisThread::sleep_for(1ms); // wait after each write
+    ThisThread::sleep_for(2ms); // wait after each write
 
     return true;
 }

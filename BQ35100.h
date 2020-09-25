@@ -33,6 +33,7 @@ using namespace std::chrono;
 
 #define BQ3500_GA_BIT_MASK       0b0000000000000001
 #define BQ3500_G_DONE_BIT_MASK   0b0000000001000000
+#define BQ3500_INITCOMP_BIT_MASK 0b0000000010000000
 #define BQ3500_CCA_BIT_MASK      0b0000010000000000
 #define BQ3500_BCA_BIT_MASK      0b0000100000000000
 #define BQ3500_CAL_MODE_BIT_MASK 0b0001000000000000
@@ -49,7 +50,7 @@ class BQ35100 {
 
     typedef enum {
         ACCUMULATOR_MODE = 0b00,
-        SOH_MODE = 0b011, // for LiMnO2
+        SOH_MODE = 0b01, // for LiMnO2
         EOS_MODE = 0b10, // for LiSOCl2
         UNKNOWN_MODE = 0b11
     } bq35100_gauge_mode_t;
@@ -127,6 +128,14 @@ class BQ35100 {
     bool setGaugeMode(bq35100_gauge_mode_t gauge_mode);
 
     /**
+     * @brief Enable lifetime data gathering feature
+     * 
+     * @note UNSEAL before use
+     * @param enable 
+     * @return true if successful, otherwise false
+     */
+    bool enableLifetime(bool enable);
+    /**
      * @brief Get the chip status
      *
      * @param status a place to put the read data
@@ -175,12 +184,28 @@ class BQ35100 {
     bool getInternalTemperature(int16_t *temp);
 
     /**
-     * @brief Set the under temperature
+     * @brief Set the under temperature threshold
      *
      * @param min minimal temperature in 0.1*C
      * @return true if successful, otherwise false
      */
-    bool setUnderTemperature(int16_t min);
+    bool setUnderTemperatureThreshold(int16_t min);
+
+    /**
+     * @brief Set the under temperature
+     * 
+     * @param clear temperature when the under tempearture is cleared in 0.1*C
+     * @return true if successful, otherwise false
+     */
+    bool setUnderTemperatureClear(int16_t clear);
+
+    /**
+     * @brief Set the low battery voltage threshold
+     *
+     * @param voltage minimal voltage in mV
+     * @return true if successful, otherwise false
+     */
+    bool setLowBatteryThreshold(uint16_t voltage);
 
     /**
      * @brief Read the voltage of the battery
@@ -191,7 +216,10 @@ class BQ35100 {
     bool getVoltage(uint16_t *voltage);
 
     /**
-     * @brief Read the current flowing from the battery
+     * @brief Read the current flowing from the battery.
+     * When the battery is discharging it will return negative value
+     * (which should be the case for primary battery).
+     * Please see https://e2e.ti.com/support/power-management/f/196/t/757688
      *
      * @param current place to put the current reading
      * @return true if successful, otherwise false
@@ -199,7 +227,10 @@ class BQ35100 {
     bool getCurrent(int16_t *current);
 
     /**
-     * @brief Read the battery capacity used in uAh (NOT mAh)
+     * @brief Read the battery capacity used in uAh (NOT mAh).
+     * It's counted from zero minus used capacity hence the result is "inverted".
+     * For correct result you should (ULONG_MAX - result + 1) = capacity used
+     * Please see https://e2e.ti.com/support/power-management/f/196/t/757688
      *
      * @param capacity_used place to put the capacity reading
      * @return true if successful, otherwise false
@@ -455,7 +486,7 @@ class BQ35100 {
      * @param wait how long to wait before repeat
      * @return true if successful, otherwise false
      */
-    bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 10ms);
+    bool waitforStatus(uint16_t expected, uint16_t mask, milliseconds wait = 100ms);
 
   private:
     I2C *_i2c;
