@@ -624,7 +624,7 @@ bool BQ35100::setSecurityMode(bq35100_security_t new_security) {
                     return false;
                 }
 
-                printf("Setting security to UNSEALED\n");
+                tr_debug("Setting security to UNSEALED");
 
                 data[2] = (_seal_codes >> 24) & 0xFF;
                 data[1] = (_seal_codes >> 16) & 0xFF;
