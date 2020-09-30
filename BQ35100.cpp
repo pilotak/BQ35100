@@ -788,6 +788,8 @@ bool BQ35100::calibrateVoltage(int16_t voltage) {
     data[0] = (int8_t)offset;
 
     // Save offset
+    ThisThread::sleep_for(1s);
+
     if (!writeExtendedData(0x400F, data, sizeof(data))) {
         return false;
     }
