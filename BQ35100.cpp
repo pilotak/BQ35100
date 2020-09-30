@@ -402,7 +402,7 @@ bool BQ35100::setUnderTemperatureClear(int16_t clear) {
     return true;
 }
 
-bool BQ35100::setLowBatteryThreshold(uint16_t voltage){
+bool BQ35100::setLowBatteryThreshold(uint16_t voltage) {
     char data[2];
     data[0] = voltage & UCHAR_MAX;
     data[1] = voltage >> 8;
@@ -443,7 +443,7 @@ bool BQ35100::getCurrent(int16_t *current) {
     }
 
     if (!getData(CMD_CURRENT, data, 2)) {
-        tr_error("Could not current reading");
+        tr_error("Could not make current reading");
         return false;
     }
 
@@ -802,6 +802,8 @@ bool BQ35100::performCCOffset(void) {
         return false;
     }
 
+    ThisThread::sleep_for(1s);
+
     while (true) {
         if (!sendCntl(CNTL_CC_OFFSET)) {
             tr_error("Error sending CC offset");
@@ -810,14 +812,18 @@ bool BQ35100::performCCOffset(void) {
 
         if (!waitforStatus(BQ3500_CCA_BIT_MASK, BQ3500_CCA_BIT_MASK)) { // wait for CCA == 1
             tr_error("Status: CCA != 1");
-            return false;
+            continue;
+
+        } else {
+            tr_debug("CCA set");
+            break;
         }
     }
 
     tr_info("Performing CC offset");
     ThisThread::sleep_for(500ms);
 
-    if (!waitforStatus(0, BQ3500_CCA_BIT_MASK, 500ms)) { // wait for CCA == 0
+    if (!waitforStatus(0, BQ3500_CCA_BIT_MASK, 1s)) { // wait for CCA == 0
         tr_error("Status: CCA != 0");
         return false;
     }
@@ -841,23 +847,29 @@ bool BQ35100::performBoardOffset(void) {
         return false;
     }
 
+    ThisThread::sleep_for(1s);
+
     while (true) {
         if (!sendCntl(CNTL_BOARD_OFFSET)) {
             tr_error("Error sending board offset");
             return false;
         }
 
-        if (!waitforStatus(BQ3500_BCA_BIT_MASK | BQ3500_CCA_BIT_MASK,
-                           BQ3500_BCA_BIT_MASK | BQ3500_CCA_BIT_MASK)) { // wait for CCA == 1 & BCA == 1
-            tr_error("Status: CCA != 1 || BCA != 1");
-            return false;
+        // wait for BCA == 1
+        if (!waitforStatus(BQ3500_BCA_BIT_MASK, BQ3500_BCA_BIT_MASK)) {
+            tr_error("Status: BCA != 1, will try again");
+            continue;
+
+        } else {
+            tr_debug("Status OK");
+            break;
         }
     }
 
     tr_info("Performing board offset");
     ThisThread::sleep_for(500ms);
 
-    if (!waitforStatus(0, BQ3500_BCA_BIT_MASK, 500ms)) { // wait for BCA == 0
+    if (!waitforStatus(0, BQ3500_BCA_BIT_MASK, 1s)) { // wait for BCA == 0
         tr_error("Status: BCA != 0");
         return false;
     }
@@ -886,6 +898,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
     external = (data[0] & 0b10000000);
 
     tr_debug("Calibrating %s temperature", external ? "external" : "internal");
+    ThisThread::sleep_for(1s);
 
     // Get avg raw temperature
     if (!getRawCalibrationData(CAL_TEMPERATURE, &avg_temp)) {
@@ -904,7 +917,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
     data[0] = (int8_t)offset;
 
     // Save offset
-    ThisThread::sleep_for(40ms);
+    ThisThread::sleep_for(1s);
 
     if (!writeExtendedData(external ? 0x400E : 0x400D, data, sizeof(data))) {
         return false;
@@ -935,6 +948,8 @@ bool BQ35100::calibrateCurrent(int16_t current) {
 
     board_offset = (data[1] << 8) | data[0];
 
+    ThisThread::sleep_for(1s);
+
     // Get avg raw current
     if (!getRawCalibrationData(CAL_CURRENT, &avg_current)) {
         return false;
@@ -956,7 +971,7 @@ bool BQ35100::calibrateCurrent(int16_t current) {
 
     // Save CC gain
     floatToDF(cc_gain, data);
-    ThisThread::sleep_for(40ms);
+    ThisThread::sleep_for(1s);
 
     if (!writeExtendedData(0x4000, data, sizeof(data))) {
         return false;
@@ -1059,6 +1074,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
 
     // Remaining bytes are the d bytes we wish to write
     memcpy(d + 3, data, len);
+    ThisThread::sleep_for(1s);
 
     if (!write(d, 3 + len)) {
         tr_error("Unable to write to ManufacturerAccessControl");
@@ -1128,6 +1144,8 @@ bool BQ35100::readExtendedData(uint16_t address, char *buffer, size_t len) {
 
     data[0] = address & UCHAR_MAX;
     data[1] = address >> 8;
+
+    ThisThread::sleep_for(1s);
 
     if (!sendData(CMD_MAC, data, 2)) {
         tr_error("Unable to write to ManufacturerAccessControl");
@@ -1230,6 +1248,8 @@ bool BQ35100::read(char *buffer, size_t len) {
 }
 
 bool BQ35100::enterCalibrationMode(bool enable) {
+    ThisThread::sleep_for(1s);
+
     if (!sendCntl(enable ? CNTL_ENTER_CAL : CNTL_EXIT_CAL)) {
         tr_error("Error entering calibration mode");
         return false;

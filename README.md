@@ -14,7 +14,7 @@ BQ35100 gauge(I2C_SDA, I2C_SCL, D7);
 
 int main() {
     if (!gauge.init()) {
-        return;
+        return 0;
     }
 
     gauge.setGaugeMode(BQ35100::ACCUMULATOR_MODE);
@@ -40,28 +40,20 @@ int main() {
         return 0;
     }
 
-    ThisThread::sleep_for(1s);
-
     if (!gauge.setSecurityMode(BQ35100::SECURITY_UNSEALED)) {
         debug("Unseal failed\n");
         return 0;
     }
-
-    ThisThread::sleep_for(1s);
 
     if (!gauge.setGaugeMode(BQ35100::ACCUMULATOR_MODE)) {
         debug("Set gauge mode failed\n");
         return 0;
     }
 
-    ThisThread::sleep_for(1s);
-
     if (!gauge.startGauge()) {
         debug("Could not start the gauge\n");
         return 0;
     }
-
-    ThisThread::sleep_for(1s);
 
     if (gauge.calibrateVoltage(3600)) { // mV
         debug("Voltage calibration successful\n");
@@ -71,8 +63,6 @@ int main() {
         return 0;
     }
 
-    ThisThread::sleep_for(1s);
-
     if (gauge.performCCOffset()) {
         debug("CC offset successful\n");
 
@@ -80,8 +70,6 @@ int main() {
         debug("CC offset failed\n");
         return 0;
     }
-
-    ThisThread::sleep_for(1s);
 
     if (gauge.performBoardOffset()) {
         debug("Board offset successful\n");
@@ -91,8 +79,6 @@ int main() {
         return 0;
     }
 
-    ThisThread::sleep_for(1s);
-
     if (gauge.calibrateCurrent(100)) { // mA
         debug("Current calibration successful\n");
 
@@ -101,8 +87,6 @@ int main() {
         return 0;
     }
 
-    ThisThread::sleep_for(1s);
-
     if (gauge.useInternalTemp(true) && gauge.calibrateCurrent(240)) { // 0.1°C
         debug("Internal temperature calibration successful\n");
 
@@ -110,8 +94,6 @@ int main() {
         debug("Internal temperature calibration failed\n");
         return 0;
     }
-
-    ThisThread::sleep_for(1s);
 
     if (gauge.useInternalTemp(false) && gauge.calibrateCurrent(240)) { // 0.1°C
         debug("External temperature calibration successful\n");
