@@ -780,7 +780,7 @@ bool BQ35100::calibrateVoltage(int16_t voltage) {
 
     tr_info("Voltage calibration difference: %li", offset);
 
-    if (offset < 128 || offset > 127) {
+    if (offset < -128 || offset > 127) {
         tr_error("Invalid voltage offset");
         return false;
     }
@@ -788,8 +788,6 @@ bool BQ35100::calibrateVoltage(int16_t voltage) {
     data[0] = (int8_t)offset;
 
     // Save offset
-    ThisThread::sleep_for(40ms);
-
     if (!writeExtendedData(0x400F, data, sizeof(data))) {
         return false;
     }
@@ -898,6 +896,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
     external = (data[0] & 0b10000000);
 
     tr_debug("Calibrating %s temperature", external ? "external" : "internal");
+
     ThisThread::sleep_for(1s);
 
     // Get avg raw temperature
@@ -1255,7 +1254,7 @@ bool BQ35100::enterCalibrationMode(bool enable) {
         return false;
     }
 
-    if (!waitforStatus(enable ? BQ3500_CAL_MODE_BIT_MASK : 0, BQ3500_CAL_MODE_BIT_MASK)) {
+    if (!waitforStatus(enable ? BQ3500_CAL_MODE_BIT_MASK : 0, BQ3500_CAL_MODE_BIT_MASK, 1s)) {
         tr_error("Calibration error/timeout");
         return false;
     }
@@ -1269,7 +1268,7 @@ bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, int16_t *resu
     char data[2];
     uint8_t adc_counter_prev = 0;
     uint8_t counter = 0;
-    uint64_t avg = 0;
+    int32_t avg = 0;
 
     if (!enterCalibrationMode(true)) {
         return false;
@@ -1294,7 +1293,9 @@ bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, int16_t *resu
             return false;
         }
 
-        avg += ((data[0]) << 8) + data[1];
+        avg += ((data[1]) << 8) + data[0];
+
+        tr_debug("Calibration avg: %i", ((data[0]) << 8) + data[1]);
         counter++;
 
         if (counter == 4) {
@@ -1302,10 +1303,13 @@ bool BQ35100::getRawCalibrationData(bq35100_calibration_t address, int16_t *resu
         }
     }
 
-    if (result) {
-        *result = (int16_t)(avg / 4);
-    }
+    avg /= 4;
 
+    tr_debug("Calibration avg: %li", avg);
+
+    if (result) {
+        *result = (int16_t)avg;
+    }
 
     if (!enterCalibrationMode(false)) {
         return false;
