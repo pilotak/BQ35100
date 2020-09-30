@@ -929,9 +929,9 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
 
 bool BQ35100::calibrateCurrent(int16_t current) {
     char data[4];
-    int16_t cc_offset;
-    int16_t board_offset;
     int16_t avg_current;
+    int16_t cc_offset;
+    int8_t board_offset;
 
     tr_info("Performing current calibration");
 
@@ -940,14 +940,14 @@ bool BQ35100::calibrateCurrent(int16_t current) {
         return false;
     }
 
-    cc_offset = (data[1] << 8) | data[0];
+    cc_offset = (data[0] << 8) | data[1];
 
     // Get board offset
-    if (!readExtendedData(0x400C, data, 2)) {
+    if (!readExtendedData(0x400C, data, 1)) {
         return false;
     }
 
-    board_offset = (data[1] << 8) | data[0];
+    board_offset = data[0];
 
     ThisThread::sleep_for(1s);
 
