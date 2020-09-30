@@ -1088,6 +1088,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
 
     if (!write(d, 2)) {
         tr_error("Unable to write to MACDataSum");
+        goto END;
     }
 
     // Write 4 + len to MACDataLen (0x61)
@@ -1098,6 +1099,8 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
         tr_error("Unable to write to MACDataLen");
         goto END;
     }
+
+    ThisThread::sleep_for(40ms);
 
     if (!getStatus(&answer)) {
         goto END;
