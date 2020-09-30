@@ -35,22 +35,34 @@ BQ35100 gauge(I2C_SDA, I2C_SCL, D7);
 
 int main() {
     // next four step are mandatory for calibration
-    if (!gauge.init()) {
+    if (gauge.init(&i2c)) {
+        debug("Init OK\n");
+
+    } else {
         debug("Could not init the gauge\n");
         return 0;
     }
 
-    if (!gauge.setSecurityMode(BQ35100::SECURITY_UNSEALED)) {
+    if (gauge.setSecurityMode(BQ35100::SECURITY_UNSEALED)) {
+        debug("Device unsealed\n");
+
+    } else {
         debug("Unseal failed\n");
         return 0;
     }
 
-    if (!gauge.setGaugeMode(BQ35100::ACCUMULATOR_MODE)) {
+    if (gauge.setGaugeMode(BQ35100::ACCUMULATOR_MODE)) {
+        debug("Gauge mode set\n");
+
+    } else {
         debug("Set gauge mode failed\n");
         return 0;
     }
 
-    if (!gauge.startGauge()) {
+    if (gauge.startGauge()) {
+        debug("Gauge started\n");
+
+    } else {
         debug("Could not start the gauge\n");
         return 0;
     }
