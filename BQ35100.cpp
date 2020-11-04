@@ -1100,7 +1100,7 @@ bool BQ35100::writeExtendedData(uint16_t address, const char *data, size_t len) 
         goto END;
     }
 
-    ThisThread::sleep_for(40ms);
+    ThisThread::sleep_for(100ms);
 
     if (!getStatus(&answer)) {
         goto END;
