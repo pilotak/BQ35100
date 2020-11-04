@@ -341,7 +341,7 @@ bool BQ35100::getTemperature(int16_t *temp) {
         return false;
     }
 
-    temp_c = ((data[1] << 8) | data[0]) / 10 - 273;
+    temp_c = ((data[1] << 8) | data[0]) / 10 - 273; // convert 0.1K to 0.1°C
 
     if (temp) {
         *temp = temp_c;
@@ -361,7 +361,7 @@ bool BQ35100::getInternalTemperature(int16_t *temp) {
         return false;
     }
 
-    temp_c = ((data[1] << 8) | data[0]) / 10 - 273;
+    temp_c = ((data[1] << 8) | data[0]) / 10 - 273; // convert 0.1K to 0.1°C
 
     if (temp) {
         *temp = temp_c;
@@ -906,7 +906,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
         return false;
     }
 
-    offset = temp - avg_temp;
+    offset = (temp + 2730) - avg_temp; // convert 0.1°C to 0.1K
 
     tr_info("Temperature calibration difference: %li", offset);
 
