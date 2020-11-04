@@ -910,7 +910,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
 
     tr_info("Temperature calibration difference: %li", offset);
 
-    if (offset < 128 || offset > 127) {
+    if (offset < -128 || offset > 127) {
         tr_error("Invalid temperature offset");
         return false;
     }
