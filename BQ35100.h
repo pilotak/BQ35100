@@ -389,9 +389,9 @@ class BQ35100 {
         CMD_MAC_DATA_LEN = 0x61,
         CMD_MAC_DATA_CONTROL = 0x62,
         CMD_CAL_COUNT = 0x79,
-        CMD_CAL_CURRENT = 0X7A,
-        CMD_CAL_VOLTAGE = 0X7C,
-        CMD_CAL_TEMPERATURE = 0X7E
+        CMD_CAL_CURRENT = 0x7A,
+        CMD_CAL_VOLTAGE = 0x7C,
+        CMD_CAL_TEMPERATURE = 0x7E
     } bq35100_cmd_t;
 
     typedef enum {
@@ -496,9 +496,9 @@ class BQ35100 {
     const uint8_t _address = BQ35100_I2C_ADDRESS;
 
     typedef enum {
-        CAL_CURRENT = 0X7A,
-        CAL_VOLTAGE = 0X7C,
-        CAL_TEMPERATURE = 0X7E
+        CAL_CURRENT = 0x7A,
+        CAL_VOLTAGE = 0x7C,
+        CAL_TEMPERATURE = 0x7E
     } bq35100_calibration_t;
 
     /**
