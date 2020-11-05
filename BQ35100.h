@@ -168,20 +168,22 @@ class BQ35100 {
     bool useInternalTemp(bool internal);
 
     /**
-     * @brief Read the temperature of the BQ35100 chip
+     * @brief Read the external temperature in 0.1 Kelvin
+     * (ie.: 2962 = 23.05°C)
      *
      * @param temp place to put the temperature reading
      * @return true if successful, otherwise false
      */
-    bool getTemperature(int16_t *temp);
+    bool getTemperature(uint16_t *temp);
 
     /**
-     * @brief Read the internal temperature of the BQ35100 chip
+     * @brief Read the internal temperature of the BQ35100 chip in 0.1 Kelvin
+     * (ie.: 2962 = 23.05°C)
      *
      * @param temp place to put the temperature reading
      * @return true if successful, otherwise false
      */
-    bool getInternalTemperature(int16_t *temp);
+    bool getInternalTemperature(uint16_t *temp);
 
     /**
      * @brief Set the under temperature threshold
@@ -216,7 +218,7 @@ class BQ35100 {
     bool getVoltage(uint16_t *voltage);
 
     /**
-     * @brief Read the current flowing from the battery.
+     * @brief Read the current flowing from the battery in mA.
      * When the battery is discharging it will return negative value
      * (which should be the case for primary battery).
      * Please see https://e2e.ti.com/support/power-management/f/196/t/757688
@@ -364,10 +366,10 @@ class BQ35100 {
      * useInternalTemp(true/false) is recommended prior to this.
      *
      * @note UNSEAL before calibration
-     * @param temp temperature in (0.1°C)
+     * @param temp temperature in 0.1 Kelvin (ie.: 2962 = 23.05°C)
      * @return true if successful, otherwise false
      */
-    bool calibrateTemperature(int16_t temp);
+    bool calibrateTemperature(uint16_t temp);
 
   protected:
     typedef enum {

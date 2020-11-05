@@ -332,42 +332,40 @@ bool BQ35100::useInternalTemp(bool internal) {
     return true;
 }
 
-bool BQ35100::getTemperature(int16_t *temp) {
+bool BQ35100::getTemperature(uint16_t *temp) {
     char data[2];
-    int16_t temp_c = SHRT_MIN;
 
     if (!getData(CMD_TEMPERATURE, data, 2)) {
         tr_error("Could not get temperature");
         return false;
     }
 
-    temp_c = ((data[1] << 8) | data[0]) / 10 - 273; // convert 0.1K to 0.1°C
-
     if (temp) {
-        *temp = temp_c;
+        *temp = (data[1] << 8) | data[0];
     }
 
-    tr_info("Temperature: %uK = %i*C", (data[1] << 8) | data[0], temp_c);
+    // conversion from 0.1K to 0.01°C
+    tr_info("Temperature: %uK = %li*C", (data[1] << 8) | data[0],
+            (int32_t)((data[1] << 8) | data[0]) * 10 - 27315);
 
     return true;
 }
 
-bool BQ35100::getInternalTemperature(int16_t *temp) {
+bool BQ35100::getInternalTemperature(uint16_t *temp) {
     char data[2];
-    int16_t temp_c = SHRT_MIN;
 
     if (!getData(CMD_INTERNAL_TEMPERATURE, data, 2)) {
         tr_error("Could not get internal temperature");
         return false;
     }
 
-    temp_c = ((data[1] << 8) | data[0]) / 10 - 273; // convert 0.1K to 0.1°C
-
     if (temp) {
-        *temp = temp_c;
+        *temp = (data[1] << 8) | data[0];
     }
 
-    tr_info("Internal temperature: %uK = %i*C", (data[1] << 8) | data[0], temp_c);
+    // conversion from 0.1K to 0.01°C
+    tr_info("Internal temperature: %uK = %li*C", (data[1] << 8) | data[0],
+            (int32_t)((data[1] << 8) | data[0]) * 10 - 27315);
 
     return true;
 }
@@ -883,7 +881,7 @@ bool BQ35100::performBoardOffset(void) {
     return true;
 }
 
-bool BQ35100::calibrateTemperature(int16_t temp) {
+bool BQ35100::calibrateTemperature(uint16_t temp) {
     char data[1];
     int16_t avg_temp;
     bool external;
@@ -906,7 +904,7 @@ bool BQ35100::calibrateTemperature(int16_t temp) {
         return false;
     }
 
-    offset = (temp + 2730) - avg_temp; // convert 0.1°C to 0.1K
+    offset = (int32_t)temp - avg_temp;
 
     tr_info("Temperature calibration difference: %li", offset);
 
