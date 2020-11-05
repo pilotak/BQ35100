@@ -99,7 +99,7 @@ int main() {
         return 0;
     }
 
-    if (gauge.useInternalTemp(true) && gauge.calibrateTemperature(240)) { // 0.1°C
+    if (gauge.useInternalTemp(true) && gauge.calibrateTemperature(2962)) { // 23.05°C
         debug("Internal temperature calibration successful\n");
 
     } else {
@@ -107,7 +107,7 @@ int main() {
         return 0;
     }
 
-    if (gauge.useInternalTemp(false) && gauge.calibrateTemperature(240)) { // 0.1°C
+    if (gauge.useInternalTemp(false) && gauge.calibrateTemperature(2962)) { // 23.05°C
         debug("External temperature calibration successful\n");
 
     } else {
