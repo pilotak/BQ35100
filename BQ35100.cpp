@@ -954,7 +954,7 @@ bool BQ35100::calibrateCurrent(int16_t current) {
         return false;
     }
 
-    float cc_gain = current / (avg_current - (cc_offset + board_offset) / 16);
+    float cc_gain = (float)current / (avg_current - (cc_offset + board_offset) / 16);
 
     if (cc_gain < 2.00E-02 || cc_gain > 10.00E+00) {
         tr_error("Invalid CC gain result");
@@ -1370,7 +1370,7 @@ void BQ35100::floatToDF(float val, char *result) {
         exp = 127;
 
     } else if (exp < -128) {
-        exp = 128;
+        exp = -128;
     }
 
     tmp_val = pow(2, 8 - exp) * val - 128;
