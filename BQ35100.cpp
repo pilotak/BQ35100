@@ -1362,7 +1362,7 @@ void BQ35100::floatToDF(float val, char *result) {
     } else if (tmp_val >= 1.0) {
         while (tmp_val >= 1.0) {
             tmp_val /= 2;
-            exp--;
+            exp++;
         }
     }
 
