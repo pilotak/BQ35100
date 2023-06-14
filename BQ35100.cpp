@@ -60,14 +60,14 @@ bool BQ35100::init(I2C *i2c_obj) {
 
     // Get device type
     for (auto i = 0; (i < MBED_CONF_BQ35100_INIT_RETRY) && !success; i++) {
-        success = getCntl(CNTL_HW_VERSION, &answer);
+        success = getCntl(CNTL_DEVICE_TYPE, &answer);
 
         if (!success) {
             ThisThread::sleep_for(100ms);
         }
     }
 
-    if (answer != 0x00A8) {
+    if (answer != 0x100) {
         tr_error("Different device type");
         return false;
     }
